@@ -12,15 +12,22 @@ torch.manual_seed(0)
 
 
 class PositionalAgentEncoding(nn.Module):
-    def __init__(self, d_model, dropout=0.1, max_t_len=200, concat=True):
+    def __init__(self, d_model, dropout=0.1, max_t_len=200, concat=False):
         super(PositionalAgentEncoding, self).__init__()
         self.dropout = nn.Dropout(p=dropout)
         self.concat = concat
         self.d_model = d_model
+        """
+        通过 concat 参数控制是否将位置编码与输入特征向量拼接。
+        如果 concat 为 True，则会将位置编码与输入特征向量在最后一个维度上拼接，然后通过一个全连接层（self.fc）进行变换，
+        以便将拼接后的维度从 2 * d_model 调整回 d_model。如果 concat 为 False，则直接将位置编码加到输入特征上。
+        Transformer原始论文中使用的是直接相加的方式来整合位置信息，这也被证明在多种任务中效果良好【而且元学习的架构也要求尽量少的模型参数】
+        """
         if concat:
             self.fc = nn.Linear(2 * d_model, d_model)
 
         pe = self.build_pos_enc(max_t_len)
+        # pe是被计算出来的 故而
         self.register_buffer('pe', pe)
 
     def build_pos_enc(self, max_len):
@@ -117,8 +124,8 @@ class Dual_TT_Encoder(nn.Module):
         self.temporal_encoder_1 = TransformerEncoder(TransformerEncoderLayer(d_model=32, nhead=8), 1)
         self.temporal_encoder_2 = TransformerEncoder(TransformerEncoderLayer(d_model=32, nhead=8), 1)
         # PE函数 对应于两个时间transformer
-        self.pos_encoder1 = PositionalAgentEncoding(emsize, 0.1, concat=True)
-        self.pos_encoder2 = PositionalAgentEncoding(emsize, 0.1, concat=True)
+        self.pos_encoder1 = PositionalAgentEncoding(emsize, 0.1, concat=False)
+        self.pos_encoder2 = PositionalAgentEncoding(emsize, 0.1, concat=False)
         # 涉及到如何将过去8帧的数据或则说是未来的12帧的数据进行合并？？
         # 直接选取最后一帧是常见做法，或则说再过一个linear或max-pooling
         # 注意相对应的ST-HIN采用的是双路的结构 并且用的都是经过transformer后的最后一步的值 故而此处用不到full-layer 需要注释掉 以防其在MLDG的过程中发生错误

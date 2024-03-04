@@ -428,8 +428,105 @@ class STAR(torch.nn.Module):
             node_abs[st:ed, :, 1] = (node_abs[st:ed, :, 1] - mean_y)
 
         return node_abs.permute(1, 0, 2)
+    def forward(self,inputs,stage,iftest=False):
 
-    def forward(self, inputs, stage, mean_list, var_list, iftest=False,ifmixup = False):
+        # ifmeta-test用来表征相应的是否需要进行注入操作，而相应的mean-list以及var——list则表示的是对应的不同域的特征均值和方差
+        # nodes_abs/nodes_norm(归一化后)(19,259,2)  shift_value(19 259 2) seq_list (19,259) nei_lists(19 259 259) nei_num(19,259) batch_pednum(50)
+        nodes_abs, nodes_norm, shift_value, seq_list, nei_lists, nei_num, batch_pednum = inputs
+        num_Ped = nodes_norm.shape[1]
+
+        outputs = torch.zeros(nodes_norm.shape[0], num_Ped, 2).cuda()
+        GM = torch.zeros(nodes_norm.shape[0], num_Ped, 32).cuda()
+
+        noise = get_noise((1, 16), 'gaussian')
+
+        for framenum in range(self.args.seq_length - 1):
+
+            if framenum >= self.args.obs_length and iftest:
+                # iftest 标志测试阶段，测试数据只有过往的8帧，后续生成的应该全部都是 基于这8帧预测得到的
+                # 提取从起始到观测帧都存在的行人，以便后续预测
+                node_index = self.get_node_index(seq_list[:self.args.obs_length])
+                updated_batch_pednum = self.update_batch_pednum(batch_pednum, node_index)
+                st_ed = self.get_st_ed(updated_batch_pednum)
+                # 回传outputs的上一帧的结果用于新一帧的预测；
+                nodes_current = outputs[self.args.obs_length - 1:framenum, node_index]
+                nodes_current = torch.cat((nodes_norm[:self.args.obs_length, node_index], nodes_current))
+                node_abs_base = nodes_abs[:self.args.obs_length, node_index]
+                # 将经过归一化的outputs数据返回至未归一化效果
+                node_abs_pred = shift_value[self.args.obs_length:framenum + 1, node_index] + outputs[
+                                                                                             self.args.obs_length - 1:framenum,
+                                                                                             node_index]
+                node_abs = torch.cat((node_abs_base, node_abs_pred), dim=0)
+                # We normalize the absolute coordinates using the mean value in the same scene
+                node_abs = self.mean_normalize_abs_input(node_abs, st_ed)
+
+            else:
+                # node-idx筛选出从起始到当前帧都存在的ped
+                node_index = self.get_node_index(seq_list[:framenum + 1])
+                nei_list = nei_lists[framenum, node_index, :]
+                nei_list = nei_list[:, node_index]
+                # 更新batch-pednum：去除消失的行人后batch中每个windows下的新的人数；仍然会随着frame的变换而变换
+                updated_batch_pednum = self.update_batch_pednum(batch_pednum, node_index)
+                # 依据updated-batch-pednum得出相应的每个windows中开始和结束的行人序列号，便于分开处理
+                st_ed = self.get_st_ed(updated_batch_pednum)
+                # 只取到framenum的数据
+                nodes_current = nodes_norm[:framenum + 1, node_index]
+                # We normalize the absolute coordinates using the mean value in the same scene
+                # 基于同一场景中的行人数据进行标准化，即运用该windows所有行人的平均xy坐标进行分析
+                node_abs = self.mean_normalize_abs_input(nodes_abs[:framenum + 1, node_index], st_ed)
+
+            # Input Embedding
+            # 此处作用将输入的xy 2维坐标变量转换为32维向量，相应的先linear，后relu，而后dropout；此处无inplace=True问题，也无+=问题；
+            if framenum == 0:
+                temporal_input_embedded = self.dropout_in(self.relu(self.input_embedding_layer_temporal(nodes_current)))
+            else:
+                # 当framenum=18时，相应的nodes——current为【19,140,2】
+                temporal_input_embedded = self.dropout_in(self.relu(self.input_embedding_layer_temporal(nodes_current)))
+                # GM对应论文中的Graph Memory
+                # todo 错误的是 【19,140,32】 即最后一轮的temporal——input-embedded，此处传完后version由0变成1，
+                #  故而此处改,由索引传递变量也是一个原位操作，会引起_version的变化,故而相应的使用.clone()完成修复
+                #  .clone()函数返回一个和源张量同shape、dtype和device的张量，与源张量不共享数据内存，但提供梯度的回溯。
+                #  故而相应的inplace-operation是在复制后的张量上进行，不会改变其值，但其后续产生的梯度仍然可以正常回传，故而避免了backward时找不到对应当时值可行计算梯度
+                temporal_input_embedded = temporal_input_embedded.clone()
+                temporal_input_embedded[:framenum] = GM[:framenum, node_index]
+            # 需要注意 temporal（nodes-current：经过基于obs观测帧的归一化）和spatial（node-abs基于全局的norm）输入的node序列数据经过不同的处理，spatial_input_embedded_(seq,num_ped,hidden_vim)
+            spatial_input_embedded_ = self.dropout_in2(self.relu(self.input_embedding_layer_spatial(node_abs)))
+            # 数据流式处理，空间输入基于最新的一帧进行分析，过往的空间关系不考虑
+            # spatial_input_embedded_[-1].unsqueeze(1) (num_ped,1,hi_vim) nei_list(num_ped,num_ped) spatial_input_embedded(num_ped,1,hi_vim)
+            spatial_input_embedded = self.spatial_encoder_1(spatial_input_embedded_[-1].unsqueeze(1), nei_list)
+            #  spatial_input_embedded （num_ped,hid_vim）
+            spatial_input_embedded = spatial_input_embedded.permute(1, 0, 2)[-1]
+            # 时间输入基于完整的截止当前帧的数据（但是其中只有最新帧的数据是输入的，最新帧往前的数据是基于过往的预测结果的，而不是原始的结果）输出会重构所有帧数据，但只取最后一帧
+            temporal_input_embedded_last = self.temporal_encoder_1(temporal_input_embedded)[-1]
+            # 取temporal-input-embedded初始到倒数第二个数据，此处倒数第一个数据经过encoder后被重构！！
+            temporal_input_embedded = temporal_input_embedded[:-1]
+
+            fusion_feat = torch.cat((temporal_input_embedded_last, spatial_input_embedded), dim=1)
+            fusion_feat = self.fusion_layer(fusion_feat)
+            # 经过第一次encoder后的最新帧数据都变了，对其拼接，输入spatial-encoder
+            spatial_input_embedded = self.spatial_encoder_2(fusion_feat.unsqueeze(1), nei_list)
+            spatial_input_embedded = spatial_input_embedded.permute(1, 0, 2)
+            # 将经过spatial_encoder_2的数据与原先的temporal_input_embedded（初始到倒数第二个）进行拼接：正好又拼接成完整的序列
+            temporal_input_embedded = torch.cat((temporal_input_embedded, spatial_input_embedded), dim=0)
+            temporal_input_embedded = self.temporal_encoder_2(temporal_input_embedded)[-1]  # 此处后从seq.228.32变为228.32
+            #  在此处添加对应的BN或则对应的attention机制 temporal-input-embedded为(batch，feature）=》均值/方差(1，feature）
+            # 根据beta分布生成权重 将来当执行MixUp时,就可以通过线性组合sample1和输入features,实现特征空间中的混合mixup
+            temporal_input_embedded = temporal_input_embedded
+            # 添加噪声
+            noise_to_cat = noise.repeat(temporal_input_embedded.shape[0], 1)
+            temporal_input_embedded_wnoise = torch.cat((temporal_input_embedded, noise_to_cat), dim=1)
+            # print("self.output_layer.weight_before", str(self.output_layer.weight._version))
+            outputs_current = self.output_layer(temporal_input_embedded_wnoise)
+            # outputs_current = nn.functional.linear(temporal_input_embedded_wnoise,self.output_layer.weight.clone(),self.output_layer.bias)
+            # 回传 outputs：相应的将预测结果传回，在预测新的一帧时运用，GM则回传中间特征层的数据，每次都只回传最新帧
+            # print("self.output_layer.weight_after",str(self.output_layer.weight._version))
+            outputs[framenum, node_index] = outputs_current
+            # todo是否是因为此处还未backwardtemporal_input_embedded，而GM的值就已经改变，而使得对应的值也被变了
+            GM[framenum, node_index] = temporal_input_embedded
+        # self.mean 00-18 共19个
+        return outputs
+
+    def forward_mixup(self, inputs, stage, mean_list, var_list, iftest=False,ifmixup = False):
         # ifmeta-test用来表征相应的是否需要进行注入操作，而相应的mean-list以及var——list则表示的是对应的不同域的特征均值和方差
         # nodes_abs/nodes_norm(归一化后)(19,259,2)  shift_value(19 259 2) seq_list (19,259) nei_lists(19 259 259) nei_num(19,259) batch_pednum(50)
         nodes_abs, nodes_norm, shift_value, seq_list, nei_lists, nei_num, batch_pednum = inputs

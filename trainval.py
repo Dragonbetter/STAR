@@ -88,10 +88,10 @@ def get_parser():
     # Meta
     parser.add_argument('--batch_around_ped', default=256, type=int, help='一个batch所应该包含的行人数，可以调节一下分析')
     parser.add_argument('--batch_around_ped_meta', default=256, type=int, help='meta一个batch所应该包含的行人数，可以调节一下分析')
-    parser.add_argument('--meta_way', type=str, default='sequential1', help='可以用两种选项，即parallel2并行和sequential1串行')
+    parser.add_argument('--meta_way', type=str, default='sequential1', help='可以用两种选项，即parallel2并行和sequential1串行') # eth parallel2效果更好
     parser.add_argument('--query_sample_num', default=4, type=int, help='每个数据集中的support采集对应几个query')
     parser.add_argument('--stage', default='origin', type=str, help='决定是否进行meta训练 可选origin MLDG MVDG MVDGMLDG')
-    parser.add_argument('--optim_trajectory_num', default=3, type=int, help='优化轨迹数量')
+    parser.add_argument('--optim_trajectory_num', default=2, type=int, help='优化轨迹数量')
     # CVAE
     parser.add_argument('--ztype', default='gaussian', type=str, help='选择创建哪种分布类型的后验分布q(z|x,y)')
     parser.add_argument('--zdim', default=16, type=int, help='对应的z均值和方差的维度')

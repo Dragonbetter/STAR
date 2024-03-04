@@ -197,7 +197,113 @@ class STAR_CVAE_HIN(STAR_CVAE):
         # self.pz_layer = nn.Linear(self.embedding_size, 2*self.args.zdim)
         self.decoder = Decoder(args)
 
-    def forward(self, inputs, stage, mean_list=[], var_list=[], ifmixup=False):
+    def forward(self, inputs, stage):
+        # 注意此处inputs前期输入的是19s，此处更改为正确的20s，因为方法不一样了
+        # nodes_abs 为原始的轨迹 后续也用这个 seq
+        obs_length = self.args.obs_length
+        pred_length = self.args.pred_length
+        # nodes_abs未归一化 /nodes_norm(归一化后)(19,259,2)  shift_value(19 259 2) seq_list (19,259) nei_lists(19 259 259) nei_num(19,259) batch_pednum(50)
+        nodes_abs, nodes_norm, shift_value, seq_list, nei_lists, nei_num, batch_pednum = inputs
+        # 注意 此处针对的是不同帧下行人数量不一的问题，传统的解决思路是直接提取从头到尾到存在的行人，而star方法则是逐帧中提取从头到尾到存在的行人，
+        # 最后的loss计算时也是只考虑从头到尾的行人，这个只是相当于利用了更多行人的信息；但在此处，我们采用传统思路预处理，因为我们是针对完全形态分析
+        # node-idx筛选出从起始到当前帧都存在的ped
+        # todo 此处的nei-list需要重写 相应的因为多了一个维度  可能相应的后续seq-list，nei-num，batch-pednum都可能需要再改写
+        node_index = self.get_node_index(seq_list)
+        # nei_list = nei_lists[:, node_index, :]
+        # nei_list = nei_list[:, :, node_index]
+        # ！！ nei-list 形状为 relation frame num-ped ，num-ped
+        nei_list = nei_lists[:, :, node_index, :]
+        nei_list = nei_list[:, :, :, node_index]
+
+        # 更新batch-pednum：去除消失的行人后batch中每个windows下的新的人数；
+        updated_batch_pednum = self.update_batch_pednum(batch_pednum, node_index)
+        # 依据updated-batch-pednum得出相应的每个windows中开始和结束的行人序列号，便于分开处理
+        # todo 在batch41出现batch_pednum = 0 的情况 ！
+        if batch_pednum.cpu().detach().numpy().shape[0] - updated_batch_pednum.cpu().detach().numpy().shape[0] > 0:
+            print(
+                'batch_pednum:' + str(batch_pednum.cpu().detach().numpy().shape) + '/' + 'updated_batch_pednum:' + str(
+                    batch_pednum.cpu().detach().numpy().shape))
+
+        st_ed = self.get_st_ed(updated_batch_pednum)
+        # todo 提取新的轨迹数据 提取的是未归一化的
+        nodes_current = nodes_abs[:, node_index, :]
+        nodes_abs_position = self.mean_normalize_abs_input(nodes_abs[:, node_index], st_ed)
+        # todo 注意 nei-list形状
+        past_traj = nodes_current[:obs_length], nodes_abs_position[:obs_length], nei_list[:, :obs_length]
+        future_traj = nodes_current[obs_length:], nodes_abs_position[obs_length:], nei_list[:, obs_length:]
+        # todo ----------修改在上面
+        # (num_ped,hidden_feature32)
+        past_feature = self.past_encoder(past_traj)
+        future_feature = self.future_encoder(future_traj)
+        #  添加HIN的话 基于上述内容进行
+        # ---------------------CVAE-------------------------------
+        ### q dist ###
+        """
+        根据超参数self.args.ztype的设置，选择创建哪种分布类型的后验分布q(z|x,y)。如果ztype为'gaussian'，
+        则使用Normal（高斯分布）类创建一个正态分布，并以qz_param作为分布的参数;从后验分布q(z | x,y)中抽样得到qz_sampled，将其用于计算KL散度（KL divergence）损失项。
+        """
+        # (batch_size,hidden_dim*2) 64
+        h = torch.cat((past_feature, future_feature), dim=1)
+        # (batch_size,32) 64->32
+        h = self.out_mlp(h)
+        # 在变分自编码器中，潜变量z的均值和方差是通过编码器网络输出的，并且需要满足一定的分布假设，例如高斯分布。
+        # 因此，该线性层的作用是将 MLP 的输出映射到满足分布假设的潜变量均值和方差，从而使得潜变量 z 可以被正确地解码和重构。
+        qz_param = self.qz_layer(h)
+        if self.args.ztype == 'gaussian':
+            qz_distribution = Normal(params=qz_param)
+        else:
+            ValueError('Unknown hidden distribution!')
+        # qz_sampled （num_ped,self.zdim16）
+        qz_sampled = qz_distribution.rsample()
+        ### todo p dist ###
+        if self.args.ztype == 'gaussian':
+            # todo 分析出 mu logvar sigma 用法
+            pz_distribution = Normal(mu=torch.zeros(past_feature.shape[0], self.args.zdim).to(past_feature.device),
+                                     logvar=torch.zeros(past_feature.shape[0], self.args.zdim).to(
+                                         past_feature.device))
+        else:
+            ValueError('Unknown hidden distribution!')
+
+        ### use q ###
+        # z = qz_sampled 基于解码器，输入过去轨迹past_traj()和特征past_feature()，采样的z，agent_num
+        node_past = nodes_current[:obs_length].transpose(0, 1)  # (num-ped,8,2)
+        node_future = nodes_current[obs_length:].transpose(0, 1)  # (num-ped,12,2)
+        # pred:(num-ped,pred,2)  recover (num_ped,obs,2)
+        # todo mixup
+        pred_traj, recover_traj = self.decoder(past_feature, qz_sampled, node_past, sample_num=1)
+        assert pred_traj.shape[0] == node_future.shape[0] == recover_traj.shape[0] == node_past.shape[0]
+        batch_size = pred_traj.shape[0]
+        loss_recover = self.calculate_loss_recover(recover_traj, node_past, batch_size)
+        loss_pred = self.calculate_loss_pred(pred_traj, node_future, batch_size)
+        batch_pednum = past_feature.shape[0]
+        loss_kl = self.calculate_loss_kl(qz_distribution, pz_distribution, batch_pednum, self.args.min_clip)
+        ### p dist for best 20 loss ###
+        """
+        主要目的在于计算loss-divers -- 由Social-GAN提出来的
+        根据均值和标准差参数p_z_params（如果self.args.learn_prior为True，则使用线性层对象self.pz_layer生成），创建先验分布p(z)，用于计算ELBO损失。
+        区别在于，这里对每个样本采样sample_num次，以便在计算ELBO损失时可以更精确地估计期望值。
+        将past_feature张量重复sample_num次，以便将batch_size和agent_num两个维度扩展为(batch_size * agent_num * sample_num)。
+        """
+        sample_num = 20
+        # todo pz-layer
+        past_feature_repeat = past_feature.repeat_interleave(sample_num, dim=0)
+        if self.args.ztype == 'gaussian':
+            pz_distribution = Normal(
+                mu=torch.zeros(past_feature_repeat.shape[0], self.args.zdim).to(past_feature.device),
+                logvar=torch.zeros(past_feature_repeat.shape[0], self.args.zdim).to(past_feature.device))
+        else:
+            ValueError('Unknown hidden distribution!')
+
+        pz_sampled = pz_distribution.rsample()
+        # diverse_pred_traj  (agent_num, sample_num, self.past_length, 2)
+        diverse_pred_traj, _ = self.decoder(past_feature_repeat, pz_sampled, node_past, sample_num=20, mode='inference')
+
+        loss_diverse = self.calculate_loss_diverse(diverse_pred_traj, node_future)
+        total_loss = loss_pred + loss_recover + loss_kl + loss_diverse
+
+        return total_loss, loss_pred.item(), loss_recover.item(), loss_kl.item(), loss_diverse.item()
+
+    def forward_mixup(self, inputs, stage, mean_list=[], var_list=[], ifmixup=False):
         # 注意此处inputs前期输入的是19s，此处更改为正确的20s，因为方法不一样了
         # nodes_abs 为原始的轨迹 后续也用这个 seq
         obs_length = self.args.obs_length
