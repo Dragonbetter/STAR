@@ -6,7 +6,6 @@ import numpy as np
 import torch
 import pandas as pd
 import os
-import cv2
 from copy import deepcopy
 torch.manual_seed(0)
 from torch import nn

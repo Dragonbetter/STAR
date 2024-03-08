@@ -6,7 +6,6 @@ import numpy as np
 import torch
 import pandas as pd
 import os
-import cv2
 from copy import deepcopy
 from torch import nn
 

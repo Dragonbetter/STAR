@@ -458,6 +458,7 @@ class DatasetProcessor_SDD(DatasetProcessor_BASE):
 
     def data_preprocess_for_origintrajectory(self, args):
         """
+        # 需要对应的传数据 
         完成复杂SDD数据集的正确处理流程
         1. 依据相应的数据要求选定对应的数据来源从而进行实验
         2. 设定一些对应值 skip length 等

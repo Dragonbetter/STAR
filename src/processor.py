@@ -665,6 +665,87 @@ class processor(object):
         train_loss_epoch = loss_epoch / len(self.dataloader.train_batch_MVDG_task)
         return train_loss_epoch
 
+    def train_MGTP_epoch_new(self, epoch):
+        """
+        整体思路：
+        每次3个轨迹，每个轨迹内部有4个task，每个task相应的依顺序更新
+        区别在于task内部的更新方式的改变：
+        原始，模型为三个轨迹复制三个不同的model，而后三个轨迹内部都以该model进行更新
+        现在两个方案：
+            1）MLDG：三个轨迹内部的model，在各自task内，经过元训练后，再复制一个新的模型，在新的模型下更新参数
+            2）？？
+        """
+        # 第一步依据完整数据拆分出tra，batch，task
+        self.dataloader.reset_batch_pointer(set='train', valid=False)
+        loss_epoch = 0
+        MVDG_optimizers = torch.optim.Adam(self.net.parameters(), lr=self.args.outer_learning_rate)
+        self.net.zero_grad()
+        fast_models = []
+        for batch_id, batch_data in tqdm(enumerate(self.dataloader.train_batch_MVDG_task),
+                                         total=len(self.dataloader.train_batch_MVDG_task),
+                                         desc="Processing MVDG Batches"):
+        #for batch_id, batch_data in enumerate(self.dataloader.train_batch_MVDG_task):
+            # 每个batch数据包含3个traj
+            # self.logger.info(f'begin{epoch},batch_traj{batch_id}')
+            start = time.time()
+            # 此处每个traj——data有4个task
+            task_query_loss = []
+            for traj_id, traj_data in enumerate(batch_data):
+                # 一个轨迹里出一个系数
+                # self.logger.info(f'begin{epoch},batch_traj{batch_id},optim_traj{traj_id}')
+                fast_model = copy.deepcopy(self.net).train().cuda()
+                fast_opts = torch.optim.Adam(fast_model.parameters(), lr=self.args.inner_learning_rate,
+                                             betas=(0.9, 0.999),
+                                             weight_decay=5e-4)
+                # 每个task内包含一个support和query
+                traj_query_loss = []
+                for task_id, task_data in enumerate(traj_data):
+                    # todo 如果有多个任务的话 则会反复更新 级联形式 ==》 后续其实就是基于此处进行更改论文的模型,添加对应的对齐loss
+                    support_set_inital,query_set_inital = task_data[1],task_data[0]
+                    # 1.计算support-loss
+                    support_total_loss, support_loss_pred, support_loss_recover, support_loss_kl, \
+                    support_loss_diverse, support_loss_TT = self.process_set(fast_model,support_set_inital,'support')
+                    # 2.更新fast-model
+                    fast_opts.zero_grad()
+                    support_total_loss.backward()
+                    fast_opts.step()
+                    # 3.计算query-loss
+                    query_total_loss, query_loss_pred, query_loss_recover, query_loss_kl, \
+                    query_loss_diverse, query_loss_TT = self.process_set(fast_model,query_set_inital,'query')
+                    # todo 第二种写法，在此处更改 MAML写法 加和两种loss
+                    traj_query_loss.append(query_total_loss)
+                    # 4.更新fast-model
+                    fast_opts.zero_grad()
+                    query_total_loss.backward()
+                    fast_opts.step()
+                task_query_loss.append(torch.mean(torch.stack(traj_query_loss)))
+                parameters = dict(fast_model.named_parameters())
+                fast_models.append(parameters)
+            task_query_loss = torch.mean(torch.stack(task_query_loss))
+            # self.logger.info(f'task_query_loss:{task_query_loss.item()}')
+            loss_epoch += task_query_loss.item()
+            # parameters字典中的值是模型参数tensor的直接引用,不是copy。
+            # 所以修改字典值实际上就是在修改模型参数内存中的tensor值。
+            MVDG_params = dict(self.net.named_parameters())
+            MVDG_optimizers.zero_grad()
+            # update_grad
+            for k in MVDG_params.keys():
+                new_v, old_v = 0, MVDG_params[k]
+                for m in fast_models:
+                    new_v += m[k]
+                new_v = new_v / len(fast_models)
+                MVDG_lr = 1
+                MVDG_params[k].grad = ((old_v - new_v) / MVDG_lr).data
+            torch.nn.utils.clip_grad_norm_(self.net.parameters(), self.args.clip)
+            MVDG_optimizers.step()
+            end = time.time()
+            if batch_id % self.args.show_step == 0 and self.args.ifshow_detail:
+                self.logger.info(f'train-{batch_id}/{len(self.dataloader.train_batch_MVDG_task)} (epoch {epoch}),task_query_loss = {task_query_loss.item():.5f},time/batch = {end - start:.5f}')
+        train_loss_epoch = loss_epoch / len(self.dataloader.train_batch_MVDG_task)
+        return train_loss_epoch
+
+
+
     def train_MVDGMLDG_epoch_sequential(self, epoch):
         """
         结合MVDG框架重写该部分代码；
