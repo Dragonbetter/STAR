@@ -74,7 +74,7 @@ class processor(object):
             'origin': 'log_curve.txt',
             'MLDG': 'MLDG_log_curve.txt',
             'MVDG': 'MVDG_log_curve.txt',
-            'MVDGMLDG': 'MVDGMLDG_log_curve.txt',
+            'MGTP': 'MGTP_log_curve.txt',
         }
         # metric
         self.best_ade = 100
@@ -149,6 +149,45 @@ class processor(object):
         """关闭并重新打开当前日志文件，用于轮转日志内容"""
         self.current_log_file.close()
         self.current_log_file = open(self.current_log_file_path, 'a+')
+
+    def reset_group_values(self,inner_dict_grads,groups_to_reset_str):
+        # inner_dict_grads 字典 键为对应的参数，值为对应的梯度
+        # groups_to_reset 需要给0的参数 str
+        # 如果输入str为空，则不重置任何组
+        if not groups_to_reset_str:
+            return inner_dict_grads
+        # 分组键名
+        # 将输入字符串转换为组名列表
+        groups_to_reset = list(groups_to_reset_str)
+        groups_keys = {
+            'q': [
+                'past_encoder.temporal_encoder_1.layers.0.self_attn.q_proj_weight',
+                'past_encoder.temporal_encoder_2.layers.0.self_attn.q_proj_weight',
+                'future_encoder.temporal_encoder_1.layers.0.self_attn.q_proj_weight',
+                'future_encoder.temporal_encoder_2.layers.0.self_attn.q_proj_weight'
+            ],
+            'k': [
+                'past_encoder.temporal_encoder_1.layers.0.self_attn.k_proj_weight',
+                'past_encoder.temporal_encoder_2.layers.0.self_attn.k_proj_weight',
+                'future_encoder.temporal_encoder_1.layers.0.self_attn.k_proj_weight',
+                'future_encoder.temporal_encoder_2.layers.0.self_attn.k_proj_weight'
+            ],
+            'v': [
+                'past_encoder.temporal_encoder_1.layers.0.self_attn.v_proj_weight',
+                'past_encoder.temporal_encoder_2.layers.0.self_attn.v_proj_weight',
+                'future_encoder.temporal_encoder_1.layers.0.self_attn.v_proj_weight',
+                'future_encoder.temporal_encoder_2.layers.0.self_attn.v_proj_weight'
+            ]
+        }
+        # 遍历需要重置的组名
+        for group in groups_to_reset:
+            keys_to_reset = groups_keys.get(group, [])
+            # 遍历选定组内的所有键，将它们对应的值设置为0
+            for key in keys_to_reset:
+                # 只有当键实际存在于字典中时才进行更新
+                if key in inner_dict_grads:
+                    inner_dict_grads[key] = 0
+        return inner_dict_grads
 
     def load_model_with_selective_strictness(self,model, state_dict, expected_missing_keys=None):
         if expected_missing_keys is None:
@@ -239,11 +278,8 @@ class processor(object):
             elif self.args.stage == 'MVDG':
                 train_loss = self.train_MVDG_epoch_new(epoch)
                 support_loss, query_loss = 0,0
-            elif self.args.stage == 'MVDGMLDG':
-                if self.args.meta_way == 'sequential1':
-                    train_loss = self.train_MVDGMLDG_epoch_sequential(epoch)
-                elif self.args.meta_way == 'parallel2':
-                    train_loss = self.train_MVDGMLDG_epoch_parallel(epoch)
+            elif self.args.stage == 'MGTP':
+                train_loss = self.train_MGTP_epoch_new(epoch)
                 support_loss,query_loss = 0,0
 
             if epoch >= self.args.start_test:
@@ -669,6 +705,7 @@ class processor(object):
         """
         test for origin
         整体思路：
+        =》先完成MGTP大致框架，而后取出对应的qkv参数，研究如何固定参数，以及设计loss
         每次3个轨迹，每个轨迹内部有4个task，每个task相应的依顺序更新
         区别在于task内部的更新方式的改变：
         原始，模型为三个轨迹复制三个不同的model，而后三个轨迹内部都以该model进行更新
@@ -682,10 +719,10 @@ class processor(object):
         MVDG_optimizers = torch.optim.Adam(self.net.parameters(), lr=self.args.outer_learning_rate)
         self.net.zero_grad()
         fast_models = []
+        # 数据租住方式与MVDG是一样的，不一样的只有单个task的处理方式
         for batch_id, batch_data in tqdm(enumerate(self.dataloader.train_batch_MVDG_task),
                                          total=len(self.dataloader.train_batch_MVDG_task),
-                                         desc="Processing MVDG Batches"):
-        #for batch_id, batch_data in enumerate(self.dataloader.train_batch_MVDG_task):
+                                         desc="Processing MGTP Batches"):
             # 每个batch数据包含3个traj
             # self.logger.info(f'begin{epoch},batch_traj{batch_id}')
             start = time.time()
@@ -695,29 +732,58 @@ class processor(object):
                 # 一个轨迹里出一个系数
                 # self.logger.info(f'begin{epoch},batch_traj{batch_id},optim_traj{traj_id}')
                 fast_model = copy.deepcopy(self.net).train().cuda()
+                # 移除 !
                 fast_opts = torch.optim.Adam(fast_model.parameters(), lr=self.args.inner_learning_rate,
-                                             betas=(0.9, 0.999),
-                                             weight_decay=5e-4)
+                                             betas=(0.9, 0.999),weight_decay=5e-4)
                 # 每个task内包含一个support和query
                 traj_query_loss = []
                 for task_id, task_data in enumerate(traj_data):
-                    # todo 如果有多个任务的话 则会反复更新 级联形式 ==》 后续其实就是基于此处进行更改论文的模型,添加对应的对齐loss
+                    # 多个任务的话 反复更新 级联形式
                     support_set_inital,query_set_inital = task_data[1],task_data[0]
                     # 1.计算support-loss
                     support_total_loss, support_loss_pred, support_loss_recover, support_loss_kl, \
                     support_loss_diverse, support_loss_TT = self.process_set(fast_model,support_set_inital,'support')
                     # 2.更新fast-model
+                    """
                     fast_opts.zero_grad()
                     support_total_loss.backward()
                     fast_opts.step()
+                    """
+                    names_weights_copy = self.get_inner_loop_parameter_dict(fast_model.named_parameters())
+                    grads = torch.autograd.grad(support_total_loss, names_weights_copy.values(), create_graph=True,
+                                                retain_graph=True, allow_unused=True)
+                    new_fast_model = copy.deepcopy(fast_model).train().cuda()
+                    inner_dict_grads = dict(zip(names_weights_copy.keys(), grads))
+                    # 在内部更新时 选择性的更新参数 默认情况下都更新
+                    inner_dict_grads = self.reset_group_values(inner_dict_grads,self.args.reset_qkv)
+                    new_inner_dict = {
+                        key: names_weights_copy[key] - self.args.inner_learning_rate * inner_dict_grads[key]
+                        for key in names_weights_copy.keys()}
+                    # 示例：在加载前检查键的匹配
+                    self.load_model_with_selective_strictness(new_fast_model, new_inner_dict)
+                    new_fast_model.zero_grad()
+                    fast_model.zero_grad()
+                    del grads, inner_dict_grads, new_inner_dict
                     # 3.计算query-loss
                     query_total_loss, query_loss_pred, query_loss_recover, query_loss_kl, \
-                    query_loss_diverse, query_loss_TT = self.process_set(fast_model,query_set_inital,'query')
-                    # todo 第二种写法，在此处更改 MAML写法 加和两种loss
+                    query_loss_diverse, query_loss_TT = self.process_set(new_fast_model,query_set_inital,'query')
                     traj_query_loss.append(query_total_loss)
                     # 4.更新fast-model
+                    """
+                    基于原始的简单更新方式加入新的更新方式
                     fast_opts.zero_grad()
                     query_total_loss.backward()
+                    fast_opts.step()
+                    """
+                    fast_opts.zero_grad()
+                    task_loss = support_total_loss + query_total_loss
+                    task_loss.backward()
+                    # 分析task-loss 计算的梯度时fast_model（support-loss）和new_fast_model（query-loss）都更新了grads
+                    # 此处需要将 new_fast_model计算得到的梯度叠加给fast_model
+                    for old, new in zip(fast_model.named_parameters(), new_fast_model.named_parameters()):
+                        # 返回一个tuple 【名称，参数tensor】
+                        old[1].grad += new[1].grad
+                    torch.nn.utils.clip_grad_norm_(fast_model.parameters(), self.args.clip)
                     fast_opts.step()
                 task_query_loss.append(torch.mean(torch.stack(traj_query_loss)))
                 parameters = dict(fast_model.named_parameters())
@@ -744,8 +810,6 @@ class processor(object):
                 self.logger.info(f'train-{batch_id}/{len(self.dataloader.train_batch_MVDG_task)} (epoch {epoch}),task_query_loss = {task_query_loss.item():.5f},time/batch = {end - start:.5f}')
         train_loss_epoch = loss_epoch / len(self.dataloader.train_batch_MVDG_task)
         return train_loss_epoch
-
-
 
     def train_MVDGMLDG_epoch_sequential(self, epoch):
         """

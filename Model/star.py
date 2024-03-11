@@ -61,44 +61,51 @@ class MultiheadAttention(nn.Module):
         >>> attn_output, attn_output_weights = multihead_attn(query, key, value)
     """
     __constants__ = ['q_proj_weight', 'k_proj_weight', 'v_proj_weight', 'in_proj_weight']
-
+    # 真实情况下 self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout)
     def __init__(self, embed_dim, num_heads, dropout=0., bias=True, add_bias_kv=False, add_zero_attn=False, kdim=None,
                  vdim=None):
         super(MultiheadAttention, self).__init__()
         self.embed_dim = embed_dim
         self.kdim = kdim if kdim is not None else embed_dim
         self.vdim = vdim if vdim is not None else embed_dim
-        self._qkv_same_embed_dim = self.kdim == embed_dim and self.vdim == embed_dim
+        # 此处决定的是否用单独的，如果qkv的嵌入维度相同，则使用单独的
+        # 假设原始的Q、K、V都是32维的，in_proj_weight实际上包含了三组转换矩阵，每组的大小都是32，分别用于Q、K、V的线性变换。
+        # 在通过这个合并的权重矩阵进行变换后，我们通常会将结果切分成三个部分，每个部分都是32维的，分别对应于转换后的Q、K、V
+        # 有效地利用了一个大矩阵同时对Q、K、V进行线性变换，而通过后续的操作（如切分）
+        # todo 直接修改此处的参数 ！！将默认的True改成False =》保证参数不变的话 应该只需要在整个的梯度字典中寻找该对应的参数，而后将其变为None即可
+        self._qkv_same_embed_dim = False
+        # self._qkv_same_embed_dim = self.kdim == embed_dim and self.vdim == embed_dim
 
         self.num_heads = num_heads
         self.dropout = dropout
         self.head_dim = embed_dim // num_heads
         # 在实践中，每个头的维度通常是原始嵌入维度除以头数。例如，如果模型的嵌入维度是512，使用8个头，那么每个头的维度将会是64
         assert self.head_dim * num_heads == self.embed_dim, "embed_dim must be divisible by num_heads"
-
+        # 投影权重: 根据_qkv_same_embed_dim标志，这些权重要么作为一个合并的权重矩阵in_proj_weight初始化，要么作为分开的q_proj_weight、k_proj_weight和v_proj_weight初始化。
         if self._qkv_same_embed_dim is False:
             self.q_proj_weight = nn.Parameter(torch.Tensor(embed_dim, embed_dim))
             self.k_proj_weight = nn.Parameter(torch.Tensor(embed_dim, self.kdim))
             self.v_proj_weight = nn.Parameter(torch.Tensor(embed_dim, self.vdim))
             self.register_parameter('in_proj_weight', None)
         else:
+            # 原文用的是这个
             self.in_proj_weight = nn.Parameter(torch.empty(3 * embed_dim, embed_dim))
             self.register_parameter('q_proj_weight', None)
             self.register_parameter('k_proj_weight', None)
             self.register_parameter('v_proj_weight', None)
-
+        # true
         if bias:
             self.in_proj_bias = nn.Parameter(torch.empty(3 * embed_dim))
         else:
             self.register_parameter('in_proj_bias', None)
         self.out_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
-
+        # false
         if add_bias_kv:
             self.bias_k = nn.Parameter(torch.empty(1, 1, embed_dim))
             self.bias_v = nn.Parameter(torch.empty(1, 1, embed_dim))
         else:
             self.bias_k = self.bias_v = None
-
+        # false
         self.add_zero_attn = add_zero_attn
 
         self._reset_parameters()
@@ -155,6 +162,8 @@ class MultiheadAttention(nn.Module):
         - attn_output_weights: :math:`(N, L, S)` where N is the batch size,
           L is the target sequence length, S is the source sequence length.
         """
+        # 区别在于： use_separate_proj_weight=True, q_proj_weight=self.q_proj_weight, k_proj_weight=self.k_proj_weight,
+        # v_proj_weight=self.v_proj_weight
         if not self._qkv_same_embed_dim:
             return multi_head_attention_forward(
                 query, key, value, self.embed_dim, self.num_heads,
@@ -206,6 +215,7 @@ class TransformerEncoderLayer(nn.Module):
             see the docs in Transformer class.
         """
         # Multi Multihead Attention
+        # todo 需要在此处添加对应的qk输出权重的结果
         src2, attn = self.self_attn(src, src, src, attn_mask=src_mask,
                                     key_padding_mask=src_key_padding_mask)
         # Add and norm

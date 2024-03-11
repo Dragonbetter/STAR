@@ -648,8 +648,8 @@ class DatasetProcessor_SDD(DatasetProcessor_BASE):
                     continue
                 for query_i in range(self.args.query_sample_num):
                     random_query_seti = random.choice(query_seti_id)
-                    while len(trainbatch_meta[random_query_seti][0][0]) == 0 or len(
-                            trainbatch_meta[random_query_seti]) == 0:
+                    # 判断顺序的问题 先判断有无 在继续判断[0][0] 因为如果该数据为None，则对应的[0][0]其实是会导致list index out of range
+                    while len(trainbatch_meta[random_query_seti]) == 0 or len(trainbatch_meta[random_query_seti][0][0]) == 0 :
                         random_query_seti = random.choice(query_seti_id)
                     random_query_seti_batch = random.randint(0, trainbatchnums_meta[random_query_seti] - 1)
                     query_set = trainbatch_meta[random_query_seti][random_query_seti_batch]

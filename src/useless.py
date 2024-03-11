@@ -1,6 +1,78 @@
 # 多种不同的尝试
 # MAML+mixup
 # MVDG代码 只适用于原始的star
+    def train_MLDG_mixup_new_epoch_parallel(self, epoch):
+        """
+        结合MLDG框架重写该部分代码 -- new-ModelStrategy 在测试时加入，对应的并行方法
+        """
+        self.dataloader.reset_batch_pointer(set='train', valid=False)
+        loss_epoch, support_loss_epoch ,query_loss_epoch = 0,0,0
+        start = time.time()
+        for batch_task_id, batch_task_data in tqdm(enumerate(self.dataloader.train_batch_MLDG_task),
+                                                   total=len(self.dataloader.train_batch_MLDG_task),
+                                                   desc="Training Progress"):
+        #for batch_task_id, batch_task_data in enumerate(self.dataloader.train_batch_MLDG_task):
+            #self.logger.info(f'begin{epoch}{batch_task_id}')
+            self.net.zero_grad()
+            task_support_loss,task_query_loss = [],[]
+            for task_id, task_batch_data in enumerate(batch_task_data):
+                support_set_inital,query_set_inital  = task_batch_data[1], task_batch_data[0]
+                support_total_loss, support_loss_pred, support_loss_recover, support_loss_kl, support_loss_diverse,\
+                support_loss_TT = self.process_set(self.net, support_set_inital, 'support')
+                task_support_loss.append(support_total_loss)
+                # 浅拷贝 names_weights_copy的值随着self.net改变,todo 此处删除了部分参数 或许出问题
+                names_weights_copy = self.get_inner_loop_parameter_dict(self.net.named_parameters())
+                grads = torch.autograd.grad(support_total_loss, names_weights_copy.values(), create_graph=True,
+                                            retain_graph=True, allow_unused=True)
+                new_model = copy.deepcopy(self.net).train().cuda()
+                # 在直接操作.grad属性之前，确保它不是None。如果是None，你需要先初始化它为0。可能错误在于此时的self.net的grad与grads的梯度不一样
+                """
+                for param in self.net.parameters():
+                    if param.grad is None:
+                        param.grad = torch.zeros_like(param)
+                        self.logger.error(f'param{param},grad is None')
+                """
+                inner_dict_grads = dict(zip(names_weights_copy.keys(), grads))
+                new_inner_dict = {key: names_weights_copy[key] - self.args.inner_learning_rate * inner_dict_grads[key]
+                                  for key in names_weights_copy.keys()}
+                # 示例：在加载前检查键的匹配
+                self.load_model_with_selective_strictness(new_model, new_inner_dict)
+                new_model.zero_grad()
+                self.net.zero_grad()
+                del grads, inner_dict_grads, new_inner_dict
+                query_total_loss, query_loss_pred, query_loss_recover, query_loss_kl, query_loss_diverse, \
+                query_loss_TT = self.process_set(new_model, query_set_inital, 'query')
+                task_query_loss.append(query_total_loss)
+            task_support_loss = torch.mean(torch.stack(task_support_loss))
+            task_query_loss = torch.mean(torch.stack(task_query_loss))
+            task_loss = task_support_loss + task_query_loss
+            # 调试分析，相应的task-support-loss更新的是self.net的梯度，而task-query-loss更新的是new——model的梯度，
+            # 故而此处每轮参数更新是按原来写法，不传递累加梯度的话其实只是用support的loss
+            # 此处需要进行debug分析，分析相应的query-loss或support-loss是否更新了模型的梯度，即需要证明正确性。
+            support_loss_epoch += task_support_loss.item()
+            query_loss_epoch += task_query_loss.item()
+            loss_epoch += task_loss.item()
+            self.optimizer.zero_grad()
+            task_loss.backward()
+            # 分析task-loss 计算的梯度时self.net（support-loss）和new_model（query-loss）都更新了grads
+            # 此处需要将new——model计算得到的梯度叠加给self.net
+            for old, new in zip(self.net.named_parameters(), new_model.named_parameters()):
+                # 返回一个tuple 【名称，参数tensor】
+                old[1].grad += new[1].grad
+            torch.nn.utils.clip_grad_norm_(self.net.parameters(), self.args.clip)
+            self.optimizer.step()
+            #self.logger.info(f'train-{batch_task_id}/{len(self.dataloader.train_batch_MLDG_task)} (epoch {epoch}),task_support_loss = {task_support_loss.item():.5f},task_query_loss = {task_query_loss.item():.5f}')
+        train_support_loss_epoch = support_loss_epoch / len(self.dataloader.train_batch_MLDG_task)
+        train_query_loss_epoch = query_loss_epoch / len(self.dataloader.train_batch_MLDG_task)
+        train_loss_epoch = loss_epoch / len(self.dataloader.train_batch_MLDG_task)
+        end = time.time()
+        self.logger.info(
+            f'epoch {epoch}, loss = {train_loss_epoch:.5f}, support_loss = {train_support_loss_epoch:.5f}, query_loss = {train_query_loss_epoch:.5f},time/batch = {end - start:.5f}')
+        return train_loss_epoch,train_support_loss_epoch,train_query_loss_epoch
+
+
+
+
 
     # 添加注入的代码 MAML + mixup
     def train_meta_mixup_epoch(self, epoch):

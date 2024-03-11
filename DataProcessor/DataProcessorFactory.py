@@ -90,14 +90,14 @@ class DatasetProcessor_BASE(ABC):
             self.train_batch_MLDG_task, self.train_batch_MLDG_tasknums = self.load_cache(self.train_MLDG_batch_cache)
             print('MLDG::train的数据批次总共有:', self.train_batch_MLDG_tasknums)
 
-        elif self.args.stage == 'MVDG' and self.args.phase == 'train':
-            print("MVDG::处理对应的MVDG-train-batch数据")
+        elif self.args.stage in ['MVDG','MGTP'] and self.args.phase == 'train':
+            print(self.args.stage + "::处理对应的"+self.args.stage+"-train-batch数据")
             self.train_MVDG_batch_cache = os.path.join(self.args.data_dir, "train_MVDG_batch_cache.cpkl")
             self.train_MVDG_batch_cache_split = os.path.join(self.args.data_dir, "train_MVDG_batch_cache_0.cpkl")
             if not (os.path.exists(self.train_MVDG_batch_cache) or os.path.exists(self.train_MVDG_batch_cache_split)):
                 self.data_preprocess_for_MVDGtask('train')
             self.train_batch_MVDG_task, self.train_batch_MVDG_tasknums = self.load_cache(self.train_MVDG_batch_cache)
-            print('Total number of training MVDG task batches :', self.train_batch_MVDG_tasknums)
+            print("Total number of training"+self.args.stage+"task batches :", self.train_batch_MVDG_tasknums)
 
         self.reset_batch_pointer(set='train', valid=False)
         self.reset_batch_pointer(set='train', valid=True)

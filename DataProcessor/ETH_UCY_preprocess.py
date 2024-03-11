@@ -183,12 +183,11 @@ class DatasetProcessor_ETH_UCY(DatasetProcessor_BASE):
             for batch_id in range(seti_batch_num):
                 support_set = trainbatch_meta[seti][batch_id]
                 # support-set 为tuple 包含tuple和list，tuple中又有0,1,2,3个ndarray和1个list
-                if len(support_set[0][0]) == 0 or len(support_set) == 0:  # 需要深入分析
+                if len(support_set) == 0  or len(support_set[0][0]) == 0:  # 需要深入分析
                     continue
                 for query_i in range(self.args.query_sample_num):
                     random_query_seti = random.choice(query_seti_id)
-                    while len(trainbatch_meta[random_query_seti][0][0]) == 0 or len(
-                            trainbatch_meta[random_query_seti]) == 0:
+                    while len(trainbatch_meta[random_query_seti]) == 0 or len(trainbatch_meta[random_query_seti][0][0]) == 0:
                         random_query_seti = random.choice(query_seti_id)
                     random_query_seti_batch = random.randint(0, trainbatchnums_meta[random_query_seti] - 1)
                     query_set = trainbatch_meta[random_query_seti][random_query_seti_batch]

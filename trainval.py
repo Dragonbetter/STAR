@@ -90,7 +90,7 @@ def get_parser():
     parser.add_argument('--batch_around_ped_meta', default=256, type=int, help='meta一个batch所应该包含的行人数，可以调节一下分析')
     parser.add_argument('--meta_way', type=str, default='sequential1', help='可以用两种选项，即parallel2并行和sequential1串行') # eth parallel2效果更好
     parser.add_argument('--query_sample_num', default=4, type=int, help='每个数据集中的support采集对应几个query')
-    parser.add_argument('--stage', default='origin', type=str, help='决定是否进行meta训练 可选origin MLDG MVDG MVDGMLDG')
+    parser.add_argument('--stage', default='origin', type=str, help='决定是否进行meta训练 可选origin MLDG MVDG MGTP')
     parser.add_argument('--optim_trajectory_num', default=2, type=int, help='优化轨迹数量')
     # CVAE
     parser.add_argument('--ztype', default='gaussian', type=str, help='选择创建哪种分布类型的后验分布q(z|x,y)')
@@ -102,7 +102,7 @@ def get_parser():
     parser.add_argument('--ifmixup', default=False, type=ast.literal_eval, help='确定是否运用混合特征注入')
     # HIN
     parser.add_argument('--relation_num', default=3, type=int, help='确定相应的不同数据集内agent类型的数量 ')
-    parser.add_argument('--HIN', default='False', type=str, help='确定是否需要运用HIN结构，以及相应的数据处理')
+    parser.add_argument('--HIN', default=False, type=ast.literal_eval, help='确定是否需要运用HIN结构，以及相应的数据处理')
     # 可视化分析
     parser.add_argument('--vis', type=str, default='None', help='分析是否需要以及何种可视化None：无，sne，traj, traj_comparison')
     parser.add_argument('--k_best', type=int, default=1, help='分析SDD可视化中需要的误差数量')
@@ -111,6 +111,7 @@ def get_parser():
     parser.add_argument('--PE', type=str, default='False', help='是否需要进行位置编码 True/False')
     parser.add_argument('--param_diff', type=str, default='origin', help='用于标记不同的参数组合从而确保运行多个代码但互相不影响')
     parser.add_argument('--Dual_TT_ablation', type=str, default='Dual_TT', help='模型的消融实验：Dual_TT,IT,TI,II,TT')
+    parser.add_argument('--reset_qkv',type=str,default='',help='确定qkv内的那些参数的梯度在内部更新时需要被重置为0')
     # parser.add_argument('--time_embedding',default=True,type=ast.literal_eval,help='确定如何从多个维度转变为一个')
     return parser
 

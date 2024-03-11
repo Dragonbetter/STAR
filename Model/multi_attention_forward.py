@@ -92,7 +92,7 @@ def multi_head_attention_forward(query,                           # type: Tensor
         - attn_output_weights: :math:`(N, L, S)` where N is the batch size,
           L is the target sequence length, S is the source sequence length.
     """
-
+    qkv_dict = {'q': None, 'k': None, 'v': None}
     tgt_len, bsz, embed_dim = query.size()
     assert embed_dim == embed_dim_to_check
     assert key.size() == value.size()
@@ -100,7 +100,7 @@ def multi_head_attention_forward(query,                           # type: Tensor
     head_dim = embed_dim // num_heads
     assert head_dim * num_heads == embed_dim, "embed_dim must be divisible by num_heads"
     scaling = float(head_dim) ** -0.5
-
+    # 将共享的矩阵参数进行拆分，或单独的直接形成linear
     if not use_separate_proj_weight:
         if torch.equal(query, key) and torch.equal(key, value):
             # self-attention
@@ -180,8 +180,12 @@ def multi_head_attention_forward(query,                           # type: Tensor
             q = linear(query, q_proj_weight_non_opt, in_proj_bias)
             k = linear(key, k_proj_weight_non_opt, in_proj_bias)
             v = linear(value, v_proj_weight_non_opt, in_proj_bias)
+    # 在经过变换后，迅速捕获q、k、v值：
+    qkv_dict['q'] = q
+    qkv_dict['k'] = k
+    qkv_dict['v'] = v
     q = q * scaling
-
+    # None
     if bias_k is not None and bias_v is not None:
         if static_k is None and static_v is None:
             k = torch.cat([k, bias_k.repeat(1, bsz, 1)])
@@ -202,18 +206,18 @@ def multi_head_attention_forward(query,                           # type: Tensor
     else:
         assert bias_k is None
         assert bias_v is None
-
+    # 拆分成多头注意力
     q = q.contiguous().view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
     if k is not None:
         k = k.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
     if v is not None:
         v = v.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
-
+    # None
     if static_k is not None:
         assert static_k.size(0) == bsz * num_heads
         assert static_k.size(2) == head_dim
         k = static_k
-
+    # None
     if static_v is not None:
         assert static_v.size(0) == bsz * num_heads
         assert static_v.size(2) == head_dim
@@ -224,7 +228,7 @@ def multi_head_attention_forward(query,                           # type: Tensor
     if key_padding_mask is not None:
         assert key_padding_mask.size(0) == bsz
         assert key_padding_mask.size(1) == src_len
-
+    # None
     if add_zero_attn:
         src_len += 1
         k = torch.cat([k, torch.zeros((k.size(0), 1) + k.size()[2:], dtype=k.dtype, device=k.device)], dim=1)
@@ -263,7 +267,17 @@ def multi_head_attention_forward(query,                           # type: Tensor
     # import pdb; pdb.set_trace()
     assert list(attn_output.size()) == [bsz * num_heads, tgt_len, head_dim]
     attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len, bsz, embed_dim)
+    # 正常的linear 将qkv经过self-atten的结果过一遍mlp
     attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
+    """
+    当need_weights=True:
+    变换维度：将不同头的注意力权重分离出来，在这里，bsz是批次大小，num_heads是头的数量，tgt_len是目标序列长度，而src_len是源序列长度。
+    平均权重：对不同头的注意力权重进行平均，即通过sum(dim=1) / num_heads计算每个头的权重和，然后除以头的总数，得到平均注意力权重。这一步骤有助于理解不同头在注意力机制中的平均贡献，也使得权重矩阵的维度从四维降低到三维(bsz, tgt_len, src_len)，便于后续处理和分析。
+            返回值：最后，函数返回attn_output（注意力机制的输出结果）和平均后的注意力权重。
+    ==》添加对应的返回值 qkv_dict 但
+    """
+    # todo 添加对应的返回值 qkv_dict 但需要注意的是和其他的输入输出进行统一 因为我并不是所有板块都需要输出，
+    #  现在而言只需要输出对应的temporal的，同时对应的past，future，不同的12都需要对应着 =》继而完成loss计算
     if need_weights:
         # average attention weights over heads
         attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
