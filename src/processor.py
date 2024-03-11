@@ -667,6 +667,7 @@ class processor(object):
 
     def train_MGTP_epoch_new(self, epoch):
         """
+        test for origin
         整体思路：
         每次3个轨迹，每个轨迹内部有4个task，每个task相应的依顺序更新
         区别在于task内部的更新方式的改变：
