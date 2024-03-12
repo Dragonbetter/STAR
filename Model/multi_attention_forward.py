@@ -45,7 +45,8 @@ def multi_head_attention_forward(query,                           # type: Tensor
                                  k_proj_weight=None,              # type: Optional[Tensor]
                                  v_proj_weight=None,              # type: Optional[Tensor]
                                  static_k=None,                   # type: Optional[Tensor]
-                                 static_v=None                    # type: Optional[Tensor]
+                                 static_v=None,                   # type: Optional[Tensor]
+                                 need_aligin_loss=False,           # type:bool
                                  ):
     # type: (...) -> Tuple[Tensor, Optional[Tensor]]
     r"""
@@ -92,7 +93,6 @@ def multi_head_attention_forward(query,                           # type: Tensor
         - attn_output_weights: :math:`(N, L, S)` where N is the batch size,
           L is the target sequence length, S is the source sequence length.
     """
-    qkv_dict = {'q': None, 'k': None, 'v': None}
     tgt_len, bsz, embed_dim = query.size()
     assert embed_dim == embed_dim_to_check
     assert key.size() == value.size()
@@ -181,9 +181,12 @@ def multi_head_attention_forward(query,                           # type: Tensor
             k = linear(key, k_proj_weight_non_opt, in_proj_bias)
             v = linear(value, v_proj_weight_non_opt, in_proj_bias)
     # 在经过变换后，迅速捕获q、k、v值：
-    qkv_dict['q'] = q
-    qkv_dict['k'] = k
-    qkv_dict['v'] = v
+    # 需要添加条件变换，只有当align-loss为真的时候，才进行存储
+    qkv_dict = {'q': None, 'k': None, 'v': None}
+    if need_aligin_loss:
+        qkv_dict['q'] = q
+        qkv_dict['k'] = k
+        qkv_dict['v'] = v
     q = q * scaling
     # None
     if bias_k is not None and bias_v is not None:
@@ -278,9 +281,13 @@ def multi_head_attention_forward(query,                           # type: Tensor
     """
     # todo 添加对应的返回值 qkv_dict 但需要注意的是和其他的输入输出进行统一 因为我并不是所有板块都需要输出，
     #  现在而言只需要输出对应的temporal的，同时对应的past，future，不同的12都需要对应着 =》继而完成loss计算
-    if need_weights:
+    if need_weights and need_aligin_loss:
         # average attention weights over heads
         attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
-        return attn_output, attn_output_weights.sum(dim=1) / num_heads
+        return attn_output, attn_output_weights.sum(dim=1) / num_heads, qkv_dict
+    elif need_weights and not need_aligin_loss:
+        # average attention weights over heads
+        attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
+        return attn_output, attn_output_weights.sum(dim=1) / num_heads, None
     else:
-        return attn_output, None
+        return attn_output, None, None

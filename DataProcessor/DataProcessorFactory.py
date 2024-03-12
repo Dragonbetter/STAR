@@ -90,7 +90,7 @@ class DatasetProcessor_BASE(ABC):
             self.train_batch_MLDG_task, self.train_batch_MLDG_tasknums = self.load_cache(self.train_MLDG_batch_cache)
             print('MLDG::train的数据批次总共有:', self.train_batch_MLDG_tasknums)
 
-        elif self.args.stage in ['MVDG','MGTP'] and self.args.phase == 'train':
+        elif self.args.stage in ['MVDG','MGTP','MGTPAligin'] and self.args.phase == 'train':
             print(self.args.stage + "::处理对应的"+self.args.stage+"-train-batch数据")
             self.train_MVDG_batch_cache = os.path.join(self.args.data_dir, "train_MVDG_batch_cache.cpkl")
             self.train_MVDG_batch_cache_split = os.path.join(self.args.data_dir, "train_MVDG_batch_cache_0.cpkl")

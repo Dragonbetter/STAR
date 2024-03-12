@@ -36,13 +36,21 @@ def set_seed(seed):
 
 
 def get_parser():
+    """
+    分析parser的几种特殊类型
+    1) default=True, type=ast.literal_eval
+    ast模块中的一个函数，用于安全地评估一个字符串并将其转换为相应的Python表达式。
+    直接使用type=bool并不会工作，因为bool("False")在Python中结果为True（因为非空字符串都被视为真）。
+    使用ast.literal_eval则能正确地将字符串"True"和"False"解析为它们对应的布尔值True和False。
+    2) default=False, action='store_true'
+    如果--learn_prior被指定了，那么这个参数的值会被设置为True。这是argparse的一个特性，用于处理那些当参数出现时意味着布尔值为真的情况。
+
+    """
     parser = argparse.ArgumentParser(description='STAR')
     # todo 后续需要添加对应的数据数据集迁移以及新数据的实验
-    parser.add_argument('--dataset', default='ETH_UCY', type=str,
-                        help='set this value to [ETH_UCY,SDD,NBA,Soccer,Ship,Ship_FVessel]')
-    parser.add_argument('--SDD_if_filter', type=str, default='True', help='是否只需要行人数据集')
-    parser.add_argument('--SDD_from', default='sdd_origin', type=str,
-                        help='确定SDD的数据来源，sdd_origin 最原始的 sdd_exist PECNet数据')
+    parser.add_argument('--dataset',default='ETH_UCY', type=str, help='set this value to [ETH_UCY,SDD,NBA,Soccer,Ship,Ship_FVessel]')
+    parser.add_argument('--SDD_if_filter', default='True', type=str, help='是否只需要行人数据集')
+
     # 路径
     parser.add_argument('--base_dir', default='.', help='Base directory including these scripts.')
     parser.add_argument('--save_base_dir', default='./output/', help='Directory for saving caches and models.')
@@ -56,15 +64,15 @@ def get_parser():
 
     parser.add_argument('--phase', default='train', help='Set this value to \'train\' or \'test\'')
     parser.add_argument('--train_model', default='star', type=str,
-                        help='Your ModelStrategy name star/new_star/new_star_hin/new_star_ship/Dual_TT')
+                        help='Your ModelStrategy name star/new_star/new_star_hin/new_star_ship/Dual_TT/Dual_TTAligin')
     parser.add_argument('--load_model', default=None, type=str,
                         help="load pretrained ModelStrategy for test or training, 需要的时候相应传入str，会组成model_str进行后续计算")
-    parser.add_argument('--ModelStrategy', default='star.STAR')
+
     parser.add_argument('--seq_length', default=20, type=int)
     parser.add_argument('--obs_length', default=8, type=int, help='注意test时，是否可以变换，以及不同的数据集也会改')
     parser.add_argument('--pred_length', default=12, type=int)
-    parser.add_argument('--batch_size', default=8, type=int)
     # 似乎没什么用？batch-size；其有batch-around-ped决定了
+    parser.add_argument('--batch_size', default=8, type=int)
     parser.add_argument('--test_batch_size', default=4, type=int)
 
     parser.add_argument('--start_test', default=10, type=int)
@@ -90,13 +98,13 @@ def get_parser():
     parser.add_argument('--batch_around_ped_meta', default=256, type=int, help='meta一个batch所应该包含的行人数，可以调节一下分析')
     parser.add_argument('--meta_way', type=str, default='sequential1', help='可以用两种选项，即parallel2并行和sequential1串行') # eth parallel2效果更好
     parser.add_argument('--query_sample_num', default=4, type=int, help='每个数据集中的support采集对应几个query')
-    parser.add_argument('--stage', default='origin', type=str, help='决定是否进行meta训练 可选origin MLDG MVDG MGTP')
+    parser.add_argument('--stage', default='origin', type=str, help='决定是否进行meta训练 可选origin MLDG MVDG MGTP MGTPAligin')
     parser.add_argument('--optim_trajectory_num', default=2, type=int, help='优化轨迹数量')
     # CVAE
     parser.add_argument('--ztype', default='gaussian', type=str, help='选择创建哪种分布类型的后验分布q(z|x,y)')
     parser.add_argument('--zdim', default=16, type=int, help='对应的z均值和方差的维度')
     parser.add_argument('--min_clip', type=float, default=2.0) # KL散度设置
-    parser.add_argument('--learn_prior', action='store_true', default=False) # 学习先验分布
+    parser.add_argument('--learn_prior', action='store_true', default=False,help='Dual_TT模型默认学习先验') # 学习先验分布
     # mixup
     parser.add_argument('--lam', type=float, default=0.05, help='在元测试时注入特征')
     parser.add_argument('--ifmixup', default=False, type=ast.literal_eval, help='确定是否运用混合特征注入')
@@ -112,7 +120,8 @@ def get_parser():
     parser.add_argument('--param_diff', type=str, default='origin', help='用于标记不同的参数组合从而确保运行多个代码但互相不影响')
     parser.add_argument('--Dual_TT_ablation', type=str, default='Dual_TT', help='模型的消融实验：Dual_TT,IT,TI,II,TT')
     parser.add_argument('--reset_qkv',type=str,default='',help='确定qkv内的那些参数的梯度在内部更新时需要被重置为0')
-    # parser.add_argument('--time_embedding',default=True,type=ast.literal_eval,help='确定如何从多个维度转变为一个')
+    parser.add_argument('--need_aligin_loss',default=False, type=ast.literal_eval, help='确定是否需要用align-loss对齐，需要配合模型和方法')
+
     return parser
 
 

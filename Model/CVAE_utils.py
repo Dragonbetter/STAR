@@ -7,7 +7,6 @@ import torch
 import pandas as pd
 import os
 from copy import deepcopy
-torch.manual_seed(0)
 from torch import nn
 # CVAE框架准备的
 class Normal:

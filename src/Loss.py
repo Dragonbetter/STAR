@@ -103,6 +103,7 @@ def L2forTestS(outputs, targets, obs_length, lossMask, num_samples):
     # final_error:FDE
     return error.item(), error_cnt, final_error.item(), final_error_cnt
 
+
 def L2forTest_RMSE_MAE(outputs, targets, obs_length, lossMask, num_samples):
     '''
     Evaluation, stochastic version
@@ -153,6 +154,7 @@ def L2forTest_RMSE_MAE(outputs, targets, obs_length, lossMask, num_samples):
 
     return error_rmse.item(), error_cnt, error_mae.item(), error_cnt
 
+
 def L2forTestS_NEWSTAR(prediction, target_pred_traj, num_samples):
     #  L2 范数  error (num_samples, pred_length, num_Peds) inputs (261人 6-43)epoch 0 batch 0 (20 2 138 2)
     error_full = torch.norm(prediction - target_pred_traj, p=2, dim=3)
@@ -173,9 +175,10 @@ def L2forTestS_NEWSTAR(prediction, target_pred_traj, num_samples):
     # 只取终点位置 其为FDE值
     final_error = torch.sum(best_error[-1])
     final_error_cnt = error_full.shape[-1]
-    return error.item(),error_cnt,final_error.item(),final_error_cnt
+    return error.item(), error_cnt, final_error.item(), final_error_cnt
 
-def L2forTest_RMSE_MAE_NEWSTAR(outputs, targets,  num_samples):
+
+def L2forTest_RMSE_MAE_NEWSTAR(outputs, targets, num_samples):
     '''
     Evaluation, stochastic version
     outputs: prediction
@@ -221,6 +224,7 @@ def L2forTest_RMSE_MAE_NEWSTAR(outputs, targets,  num_samples):
 
     return error_rmse.item(), error_cnt, error_mae.item(), error_cnt
 
+
 def timeit(method):
     def timed(*args, **kw):
         ts = time.time()
@@ -251,3 +255,76 @@ class MAE(torch.nn.Module):
         criterion = nn.L1Loss()
         loss = criterion(x, y)
         return loss
+
+
+# 为Aligin-loss 做准备 =》tensor版本
+def gaussian_kernel(x, y, sigma):
+    """Compute the Gaussian kernel between x and y"""
+    sq_dist = torch.sum(x ** 2, 1).reshape(-1, 1) + torch.sum(y ** 2, 1) - 2 * torch.matmul(x, y.T)
+    return torch.exp(-sq_dist / (2 * sigma ** 2))
+
+
+def compute_mmd(x, y, sigma):
+    """Compute the MMD value between distributions x and y"""
+
+    xx_kernel = gaussian_kernel(x, x, sigma)
+    yy_kernel = gaussian_kernel(y, y, sigma)
+    xy_kernel = gaussian_kernel(x, y, sigma)
+
+    return xx_kernel.mean() + yy_kernel.mean() - 2 * xy_kernel.mean()
+
+# This function will calculate the total MMD for corresponding tensors in two nested dictionaries
+# keys_to_compute = ['q', 'k']
+# This could be ['q'], ['k'], ['v'], ['q', 'k'], ['q', 'v'], ['k', 'v'], or ['q', 'k', 'v']
+
+def calculate_selected_mmd(dict1, dict2, keys_to_include, sigma):
+    device = sigma.device
+    mmd_total = torch.tensor(0.0, device=device)  # Initialize mmd_total on the correct device
+    if isinstance(dict1, dict) and isinstance(dict2, dict):
+        # If the current items are dictionaries, recurse
+        for key in dict1:
+            if key in keys_to_include:
+                mmd_total += calculate_selected_mmd(dict1[key], dict2[key], keys_to_include, sigma)
+    elif isinstance(dict1, torch.Tensor) and isinstance(dict2, torch.Tensor) and dict1.dim() == 3:
+        # If the items are tensors and have three dimensions (time, batch, features), compute their MMD
+        # Assuming A and B are your input arrays with shapes (8, 146, 32) and (8, 214, 32) respectively.
+        # We first need to reshape them to (8*146, 32) and (8*214, 32) to treat each time step as a separate sample.
+        mmd_total += compute_mmd(dict1.reshape(-1, dict1.size(-1)), dict2.reshape(-1, dict2.size(-1)), sigma)
+    else:
+        raise ValueError("Non-matching types encountered in the dictionaries or invalid tensor dimension.")
+
+    return mmd_total
+
+def Aligin_loss(support,query,keys_to_compute,sigma):
+    """
+    keys_to_compute str->list
+    分析support，query对应的qkv dict的值 而后基于MMD进行对应的计算！！
+    先分时间进行对应，而后汇总对应
+    1.数据格式
+    2.kernel
+    3.MMD计算
+    4.时间维度
+    """
+    # Convert string to list if not already a list
+    if isinstance(keys_to_compute, str):
+        keys_to_compute =  list(keys_to_compute)
+    past_TS = calculate_selected_mmd(support['past']['TS'], query['past']['TS'], keys_to_compute,sigma)
+    past_ST = calculate_selected_mmd(support['past']['ST'], query['past']['ST'], keys_to_compute,sigma)
+    future_TS = calculate_selected_mmd(support['future']['TS'], query['future']['TS'], keys_to_compute,sigma)
+    future_ST =  calculate_selected_mmd(support['future']['ST'], query['future']['ST'], keys_to_compute,sigma)
+    mmd_total = past_TS + past_ST + future_ST +future_TS
+    return mmd_total
+
+"""
+# Example dictionaries structure, here we use random tensors for demonstration
+# In a real scenario, you would replace these with the actual tensors from your data.
+support = {
+    'past': {'TS': {'q': torch.randn(8, 146, 32), 'k': torch.randn(8, 146, 32), 'v': torch.randn(8, 146, 32)}},
+    'future': {'TS': {'q': torch.randn(8, 146, 32), 'k': torch.randn(8, 146, 32), 'v': torch.randn(8, 146, 32)}}
+}
+query = {
+    'past': {'TS': {'q': torch.randn(8, 214, 32), 'k': torch.randn(8, 214, 32), 'v': torch.randn(8, 214, 32)}},
+    'future': {'TS': {'q': torch.randn(8, 214, 32), 'k': torch.randn(8, 214, 32), 'v': torch.randn(8, 214, 32)}}
+}
+
+"""

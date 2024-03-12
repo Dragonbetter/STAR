@@ -7,8 +7,6 @@ from Model.CVAE_utils import Normal,MLP2,MLP
 from torch.distributions.normal import Normal as Normal_official
 from Model.star import TransformerModel,TransformerEncoder,TransformerEncoderLayer
 
-torch.manual_seed(0)
-
 
 class DecomposeBlock(nn.Module):
     '''

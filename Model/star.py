@@ -7,7 +7,6 @@ import torch.nn.functional as F
 from Model.multi_attention_forward import multi_head_attention_forward
 from Model.CVAE_utils import Normal,MLP2,MLP
 from torch.distributions.normal import Normal as Normal_official
-torch.manual_seed(0)
 def get_noise(shape, noise_type):
     if noise_type == "gaussian":
         return torch.randn(shape).cuda()
@@ -134,7 +133,7 @@ class MultiheadAttention(nn.Module):
         super(MultiheadAttention, self).__setstate__(state)
 
     def forward(self, query, key, value, key_padding_mask=None,
-                need_weights=True, attn_mask=None):
+                need_weights=True, attn_mask=None,need_aligin_loss=False):
         # type: (Tensor, Tensor, Tensor, Optional[Tensor], bool, Optional[Tensor]) -> Tuple[Tensor, Optional[Tensor]]
         r"""
     Args:
@@ -174,7 +173,7 @@ class MultiheadAttention(nn.Module):
                 key_padding_mask=key_padding_mask, need_weights=need_weights,
                 attn_mask=attn_mask, use_separate_proj_weight=True,
                 q_proj_weight=self.q_proj_weight, k_proj_weight=self.k_proj_weight,
-                v_proj_weight=self.v_proj_weight)
+                v_proj_weight=self.v_proj_weight,need_aligin_loss=need_aligin_loss)
         else:
             return multi_head_attention_forward(
                 query, key, value, self.embed_dim, self.num_heads,
@@ -183,7 +182,7 @@ class MultiheadAttention(nn.Module):
                 self.dropout, self.out_proj.weight, self.out_proj.bias,
                 training=self.training,
                 key_padding_mask=key_padding_mask, need_weights=need_weights,
-                attn_mask=attn_mask)
+                attn_mask=attn_mask,need_aligin_loss=need_aligin_loss)
 
 
 class TransformerEncoderLayer(nn.Module):
@@ -203,7 +202,8 @@ class TransformerEncoderLayer(nn.Module):
 
         self.activation = _get_activation_fn(activation)
 
-    def forward(self, src, src_mask=None, src_key_padding_mask=None):
+    def forward(self, src, src_mask=None, src_key_padding_mask=None,need_aligin_loss=False):
+        # 默认为False，只有单独的TemporalTransformerEncoder 可以唤醒该结果 ！！
         r"""Pass the input through the encoder layer.
 
         Args:
@@ -215,9 +215,9 @@ class TransformerEncoderLayer(nn.Module):
             see the docs in Transformer class.
         """
         # Multi Multihead Attention
-        # todo 需要在此处添加对应的qk输出权重的结果
-        src2, attn = self.self_attn(src, src, src, attn_mask=src_mask,
-                                    key_padding_mask=src_key_padding_mask)
+        # 在此处添加对应的qkv经过第一轮线性变换后的值输出值
+        src2, attn, qkv_dict = self.self_attn(src, src, src, attn_mask=src_mask,
+                                    key_padding_mask=src_key_padding_mask,need_aligin_loss=need_aligin_loss)
         # Add and norm
         src = src + self.dropout1(src2)
         '''
@@ -240,7 +240,7 @@ class TransformerEncoderLayer(nn.Module):
         # Add and norm
         src = src + self.dropout2(src2)
         src = self.norm2(src)
-        return src, attn
+        return src, attn, qkv_dict
 
 
 class TransformerEncoder(nn.Module):
@@ -278,9 +278,9 @@ class TransformerEncoder(nn.Module):
         output = src
 
         atts = []
-        # Encoder有1层transformer layer
+        # 考虑到该 TransformerEncoder同时通用与时间和空间，故而此处还是默认设置为Fasle 而且也不返回attn，qkv——dict
         for i in range(self.num_layers):
-            output, attn = self.layers[i](output, src_mask=mask,
+            output, attn, qkv_dict = self.layers[i](output, src_mask=mask,
                                           src_key_padding_mask=src_key_padding_mask)
             atts.append(attn)
         if self.norm:

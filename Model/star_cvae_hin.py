@@ -6,7 +6,6 @@ from torch.distributions.normal import Normal as Normal_official
 from Model.star import TransformerModel, TransformerEncoder, TransformerEncoderLayer
 from Model.star_cvae import Decoder, STAR_CVAE
 
-torch.manual_seed(0)
 
 """ Positional Encoding """
 

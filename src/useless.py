@@ -1,6 +1,317 @@
 # 多种不同的尝试
 # MAML+mixup
 # MVDG代码 只适用于原始的star
+    def train_MVDGMLDG_epoch_sequential(self, epoch):
+        """
+        结合MVDG框架重写该部分代码；
+        每次有三个轨迹，每个轨迹内部有4个task；相应的需要注意此处3个轨迹是添加训练时间还是原始的batch数分3块；两种都试一下
+        内外循环 reptile
+        此处的写法是将原有的batch在分成3个部分
+        ==》分析数据集本身 发现eth确实与其他四个相差较大，行人更少，速度更快；
+        ==》实验思路：包括调节学习率，更改数据生成。
+        todo 现有的结果是hotel0.25-0.22-0.18已经有显著提升，zara1,zara2,univ仍然在下降中，eth效果混乱，没有学到泛化性，对于源域过拟合了
+              后续需要针对eth多次实验，观测器参数是否进入极小值点了，以及相应的以eth为测试域，或则说用另外其他四个做训练会有什么区别
+        """
+        # 第一步依据完整数据拆分出tra，batch，task
+        self.dataloader.reset_batch_pointer(set='train', valid=False)
+        loss_epoch = 0
+        MVDG_optimizers = torch.optim.Adam(self.net.parameters(), lr=self.args.outer_learning_rate)
+        self.net.zero_grad()
+        fast_models = []
+        for batch_id, batch_data in enumerate(self.dataloader.train_batch_MVDG_task):
+            # 每个batch数据包含3个traj
+            print('begin' + str(epoch) + 'batch_traj' + str(batch_id))
+            start = time.time()
+            # 此处每个traj——data有4个task
+            task_query_loss = []
+            for traj_id, traj_data in enumerate(batch_data):
+                # print('begin' + str(epoch) + 'batch_traj' + str(batch_id) + 'optim_traj' + str(traj_id))
+                fast_model = copy.deepcopy(self.net).train().cuda()
+                fast_opts = torch.optim.Adam(fast_model.parameters(), lr=self.args.inner_learning_rate,
+                                             betas=(0.9, 0.999),
+                                             weight_decay=5e-4)
+                # 每个task内包含一个support和query
+                traj_query_loss,traj_support_loss = [],[]
+                mean_list,var_list =[],[]
+                for task_id,task_data in enumerate(traj_data):
+                    support_set_inital = task_data[1]
+                    if self.args.train_model == 'new_star' or self.args.train_model =='new_star_hin':
+                        support_total_loss, support_loss_pred, support_loss_recover, support_loss_kl, \
+                        support_loss_diverse, mean_support, var_support = self.new_star_forward(fast_model,
+                                                                                                support_set_inital,
+                                                                                                stage='support',
+                                                                                                mean_list=[],
+                                                                                                var_list=[],
+                                                                                                ifmixup=self.args.ifmixup)
+                    elif self.args.train_model == 'star':
+                        support_total_loss, mean_support, var_support = self.star_mixup_forward(fast_model, support_set_inital,
+                                                                                          stage='support', mean_list=[],
+                                                                                          var_list=[], ifmixup=self.args.ifmixup)
+                    mean_list.append(mean_support)
+                    var_list.append(var_support)
+                    traj_support_loss.append(support_total_loss)
+                traj_support_loss = torch.mean(torch.stack(traj_support_loss))
+                names_weights_copy = self.get_inner_loop_parameter_dict(fast_model.named_parameters())
+                grads = torch.autograd.grad(traj_support_loss, names_weights_copy.values(), create_graph=True,
+                                        retain_graph=True, allow_unused=True)
+                fast_new_model = copy.deepcopy(fast_model).train().cuda()
+                inner_dict_grads = dict(zip(names_weights_copy.keys(), grads))
+                new_inner_dict = {key: names_weights_copy[key] - self.args.inner_learning_rate * inner_dict_grads[key]
+                                  for key in names_weights_copy.keys()}
+                fast_new_model.load_state_dict(new_inner_dict)
+                fast_new_model.zero_grad()
+                fast_model.zero_grad()
+                del grads, inner_dict_grads, new_inner_dict
+                query_set_inital = traj_data[0][0]
+                if self.args.train_model == 'new_star' or self.args.train_model =='new_star_hin':
+                    query_total_loss, query_loss_pred, query_loss_recover, query_loss_kl, \
+                    query_loss_diverse, _, _ = self.new_star_forward(fast_new_model, query_set_inital, stage='query',
+                                                                     mean_list=mean_list, var_list=var_list,
+                                                                     ifmixup=self.args.ifmixup)
+                elif self.args.train_model == 'star':
+                    query_total_loss, _, _ = self.star_mixup_forward(fast_new_model, query_set_inital, stage='query',
+                                                                     mean_list=mean_support, var_list=var_support,
+                                                                     ifmixup=self.args.ifmixup)
+                traj_query_loss = query_total_loss
+                traj_loss = traj_support_loss + traj_query_loss
+                fast_opts.zero_grad()
+                traj_loss.backward()
+                for old, new in zip(fast_model.named_parameters(), fast_new_model.named_parameters()):
+                    # 返回一个tuple 【名称，参数tensor】
+                    old[1].grad += new[1].grad
+                torch.nn.utils.clip_grad_norm_(fast_model.parameters(), self.args.clip)
+                fast_opts.step()
+
+                task_query_loss.append(traj_query_loss)
+                parameters = dict(fast_model.named_parameters())
+                fast_models.append(parameters)
+            task_query_loss = torch.mean(torch.stack(task_query_loss))
+            # print('task_query_loss:' + str(task_query_loss.cpu().detach().numpy()))
+            loss_epoch = loss_epoch + task_query_loss.item()
+            # parameters字典中的值是模型参数tensor的直接引用,不是copy。
+            # 所以修改字典值实际上就是在修改模型参数内存中的tensor值。
+            MVDG_params = dict(self.net.named_parameters())
+            MVDG_optimizers.zero_grad()
+            # update_grad
+            for k in MVDG_params.keys():
+                new_v, old_v = 0, MVDG_params[k]
+                for m in fast_models:
+                    new_v += m[k]
+                new_v = new_v / len(fast_models)
+                MVDG_lr = 1
+                MVDG_params[k].grad = ((old_v - new_v) / MVDG_lr).data
+            torch.nn.utils.clip_grad_norm_(self.net.parameters(), self.args.clip)
+            MVDG_optimizers.step()
+            end = time.time()
+            if batch_id % self.args.show_step == 0 and self.args.ifshow_detail:
+                print('train-{}/{} (epoch {}), train_loss = {:.5f}, time/batch = {:.5f} '.format(
+                    batch_id, len(self.dataloader.train_batch_MVDG_task), epoch, task_query_loss.item(),
+                    end - start))
+        train_loss_epoch = loss_epoch / len(self.dataloader.train_batch_MVDG_task)
+        return train_loss_epoch
+
+    def train_MVDGMLDG_epoch_parallel(self,epoch):
+        """
+        结合MVDG框架重写该部分代码；
+        每次有三个轨迹，每个轨迹内部有4个task；相应的需要注意此处3个轨迹是添加训练时间还是原始的batch数分3块；两种都试一下
+        内外循环 + reptile
+        此处的写法是将原有的batch在分成3个部分
+        multi-task 中的梯度更新方式改为损失加和
+
+        """
+        # 第一步依据完整数据拆分出tra，batch，task
+        self.dataloader.reset_batch_pointer(set='train', valid=False)
+        loss_epoch = 0
+        MVDG_optimizers = torch.optim.Adam(self.net.parameters(), lr=self.args.outer_learning_rate)
+        self.net.zero_grad()
+        fast_models = []
+        for batch_id, batch_data in enumerate(self.dataloader.train_batch_MVDG_task):
+            print('begin' + str(epoch) + 'batch_traj' + str(batch_id))
+            start = time.time()
+            # 此处每个traj——data有4个task
+            traj_query_loss = []
+            for traj_id, traj_data in enumerate(batch_data):
+                fast_model = copy.deepcopy(self.net).train().cuda()
+                fast_opts = torch.optim.Adam(fast_model.parameters(), lr=self.args.inner_learning_rate,
+                                             betas=(0.9, 0.999),weight_decay=5e-4)
+                task_query_loss= []
+                for task_id, task_data in enumerate(traj_data):
+                    support_set_inital = task_data[1]
+                    query_set_inital = task_data[0]
+                    if self.args.train_model == 'new_star' or self.args.train_model =='new_star_hin':
+                        support_total_loss, support_loss_pred, support_loss_recover, support_loss_kl, \
+                        support_loss_diverse, mean_support, var_support = self.new_star_forward(fast_model,
+                                                                                                support_set_inital,
+                                                                                                stage='support',
+                                                                                                mean_list=[],
+                                                                                                var_list=[],
+                                                                                                ifmixup=self.args.ifmixup)
+                    elif self.args.train_model == 'star':
+                        support_total_loss, mean_support, var_support = self.star_mixup_forward(fast_model,
+                                                                                                support_set_inital,
+                                                                                                stage='support',
+                                                                                                mean_list=[],
+                                                                                                var_list=[],
+                                                                                                ifmixup=self.args.ifmixup)
+                    names_weights_copy = self.get_inner_loop_parameter_dict(fast_model.named_parameters())
+                    grads = torch.autograd.grad(support_total_loss, names_weights_copy.values(), create_graph=True,
+                                                retain_graph=True, allow_unused=True)
+                    fast_new_model = copy.deepcopy(fast_model).train().cuda()
+                    inner_dict_grads = dict(zip(names_weights_copy.keys(), grads))
+                    new_inner_dict = {
+                        key: names_weights_copy[key] - self.args.inner_learning_rate * inner_dict_grads[key]
+                        for key in names_weights_copy.keys()}
+                    fast_new_model.load_state_dict(new_inner_dict)
+                    fast_new_model.zero_grad()
+                    fast_model.zero_grad()
+                    del grads, inner_dict_grads, new_inner_dict
+                    if self.args.train_model == 'new_star' or self.args.train_model =='new_star_hin':
+                        query_total_loss, query_loss_pred, query_loss_recover, query_loss_kl, \
+                        query_loss_diverse, _, _ = self.new_star_forward(fast_new_model, query_set_inital,
+                                                                         stage='support',
+                                                                         mean_list=[],
+                                                                         var_list=[],
+                                                                         ifmixup=self.args.ifmixup)
+                    elif self.args.train_model == 'star':
+                        query_total_loss, _, _ = self.star_mixup_forward(fast_new_model, query_set_inital,
+                                                                         stage='support',
+                                                                         mean_list=[],
+                                                                         var_list=[],
+                                                                         ifmixup=self.args.ifmixup)
+                    task_loss = support_total_loss + query_total_loss
+                    fast_opts.zero_grad()
+                    task_loss.backward()
+                    for old, new in zip(fast_model.named_parameters(), fast_new_model.named_parameters()):
+                        # 返回一个tuple 【名称，参数tensor】
+                        old[1].grad += new[1].grad
+                    torch.nn.utils.clip_grad_norm_(fast_model.parameters(), self.args.clip)
+                    fast_opts.step()
+                    task_query_loss.append(query_total_loss)
+                traj_query_loss.append(torch.mean(torch.stack(task_query_loss)))
+                parameters = dict(fast_model.named_parameters())
+                fast_models.append(parameters)
+            batch_query_loss =  torch.mean(torch.stack(traj_query_loss))
+            loss_epoch += batch_query_loss.item()
+            # parameters字典中的值是模型参数tensor的直接引用,不是copy。
+            # 所以修改字典值实际上就是在修改模型参数内存中的tensor值。
+            MVDG_params = dict(self.net.named_parameters())
+            MVDG_optimizers.zero_grad()
+            # update_grad
+            for k in MVDG_params.keys():
+                new_v, old_v = 0, MVDG_params[k]
+                for m in fast_models:
+                    new_v += m[k]
+                new_v = new_v / len(fast_models)
+                MVDG_lr = 1
+                MVDG_params[k].grad = ((old_v - new_v) / MVDG_lr).data
+            torch.nn.utils.clip_grad_norm_(self.net.parameters(), self.args.clip)
+            MVDG_optimizers.step()
+            end = time.time()
+            if batch_id % self.args.show_step == 0 and self.args.ifshow_detail:
+                print('train-{}/{} (epoch {}), train_loss = {:.5f}, time/batch = {:.5f} '.format(
+                    batch_id, len(self.dataloader.train_batch_MVDG_task), epoch, batch_query_loss.item(),
+                    end - start))
+        train_loss_epoch = loss_epoch / len(self.dataloader.train_batch_MVDG_task)
+        return train_loss_epoch
+    # 原始meta的代码
+    def train_meta_epoch(self, epoch):
+        """
+        结合Meta框架重写该部分代码；
+        内外循环
+        """
+        # 第一步依据完整数据拆分出batch list
+        self.dataloader.reset_batch_pointer(set='train', valid=False)
+        loss_epoch = 0
+        for batch_task_id, batch_task_data in enumerate(self.dataloader.train_batch_MLDG_task):
+            # todo 明晰参数复制的过程，以及初步更新和二次更新的不同点，
+            #  相应的support loss计算 query loss计算以及二次更新的结果 以及对应的后续将其函数化
+            # 针对batch-task-data中的4个task进行处理 list
+            print('begin' + str(epoch) + str(batch_task_id))
+            start = time.time()
+            self.net.zero_grad()
+            # !!!!(1)注意的是 state——dict是浅拷贝，即net-initial-dict改变的话，那么当你修改param，相应地也会修改model的参数。
+            # model这个对象实际上是指向各个参数矩阵的，而浅拷贝只会拷贝最外层的这些“指针；
+            # from copy import deepcopy  best_state = copy.deepcopy(ModelStrategy.state_dict()) 深拷贝 互不影响
+            net_initial_dict = copy.deepcopy(self.net.state_dict())
+            task_query_loss = []
+            for task_id, task_batch_data in enumerate(batch_task_data):
+                # 复制原始net的参数，并加载到对应的模型中，后续的net用这个去计算
+                print('begin' + str(epoch) + '--' + str(batch_task_id) + '---' + str(task_id))
+                # 1 !!!! (2)每次都从1开始 清零 初始化一个self.new——model的话会导致反复更新累加 导致原位操作 7-9
+                new_model = STAR(self.args).cuda()
+                # 2
+                new_model.load_state_dict(net_initial_dict)
+                new_model.zero_grad()
+                # 准备数据
+                support_set_inital = task_batch_data[1]
+                query_set_inital = task_batch_data[0]
+                # todo forward需要与对应的参数结合起来  内外参数
+                support_loss = self.meta_forward(new_model, support_set_inital, stage='support')
+                # 计算grad
+                names_weights_copy = self.get_inner_loop_parameter_dict(new_model.named_parameters())
+                # create_graph,retain_graph的取值
+                grads = torch.autograd.grad(support_loss, names_weights_copy.values(), create_graph=False,
+                                            retain_graph=False, allow_unused=True)
+                inner_dict_grads = dict(zip(names_weights_copy.keys(), grads))
+                new_inner_dict = {key: names_weights_copy[key] - self.task_learning_rate * inner_dict_grads[key] for key
+                                  in names_weights_copy.keys()}
+                # 3加载内循环更新完的参数 此处更新参数 从而更改version 以新参数计算query的loss
+                new_model.load_state_dict(new_inner_dict)
+                # 按理此处没有grad？
+                new_model.zero_grad()
+                del grads
+                query_loss = self.meta_forward(new_model, query_set_inital, stage='query')
+                task_query_loss.append(query_loss)
+            task_query_loss = torch.mean(torch.stack(task_query_loss))
+            print('task_query_loss:' + str(task_query_loss.cpu().detach().numpy()))
+            loss_epoch = loss_epoch + task_query_loss.item()
+            """
+            # ！！！（3）
+            todo task_query_loss是由内部的new_model计算得到的，loss backward只会计算new_model网络的梯度，此时其初始值是不同于self.net的
+            我们后期只需要他的梯度，不需要他的值，故而设计函数将梯度对应传回来即可
+            torch1.5以下，不会监查原位操作的问题，但相应的其实其梯度计算错误。
+            """
+            task_query_loss.backward()
+            for old, new in zip(self.net.named_parameters(), new_model.named_parameters()):
+                # 返回一个tuple 【名称，参数tensor】
+                old[1].grad = new[1].grad
+            torch.nn.utils.clip_grad_norm_(self.net.parameters(), self.args.clip)
+            self.optimizer.step()
+            self.optimizer.zero_grad()
+            end = time.time()
+            if batch_task_id % self.args.show_step == 0 and self.args.ifshow_detail:
+                print(
+                    'train-{}/{} (epoch {}), train_loss = {:.5f}, time/batch = {:.5f} '.format(
+                        batch_task_id, len(self.dataloader.train_batch_MLDG_task), epoch, task_query_loss.item(),
+                        end - start))
+        train_loss_epoch = loss_epoch / len(self.dataloader.train_batch_MLDG_task)
+        return train_loss_epoch
+
+    def meta_forward(self, model, data, stage):
+        """
+        loss 不在这里面求解
+        """
+        model.train()
+        data_set = self.dataloader.rotate_shift_batch(data[0])
+        # 将数据转成pytorch的tensor格式 将其转移到GPU上
+        data_set = tuple([torch.Tensor(i) for i in data_set])
+        data_set = tuple([i.cuda() for i in data_set])
+        loss = torch.zeros(1).cuda()
+        batch_abs, batch_norm, shift_value, seq_list, nei_list, nei_num, batch_pednum = data_set
+        set_forward = batch_abs[:-1], batch_norm[:-1], shift_value[:-1], seq_list[:-1], nei_list[:-1], nei_num[
+                                                                                                       :-1], batch_pednum
+        # todo forward需要与对应的参数结合起来  内外参数
+        print('begin ' + stage)
+        # todo iftest ?
+        outputs = model.forward(set_forward, iftest=False)
+        lossmask, num = getLossMask(outputs, seq_list[0], seq_list[1:], using_cuda=self.args.using_cuda)
+        loss_o = torch.sum(self.criterion(outputs, batch_norm[1:, :, :2]), dim=2)
+        # 测试时此处应该batch——norm只有[1:8,:,:2] [7,258,2] outputs[:7,:,:]  lossmask[:7,:] 相应的num也需要变sum(sum[lossmask])
+        # lossmask/loss_o size [19(time),258(batch_pednum)] ==> [8,258] (seq_length, num_Peds)
+        loss = loss + torch.sum(loss_o * lossmask / num)
+        return loss
+
+
     def train_MLDG_mixup_new_epoch_parallel(self, epoch):
         """
         结合MLDG框架重写该部分代码 -- new-ModelStrategy 在测试时加入，对应的并行方法
