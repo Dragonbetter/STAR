@@ -25,6 +25,8 @@ from DataProcessor.Soccer_preprocess import DatasetProcessor_Soccer
 from DataProcessor.Ship_preprocess import DatasetProcessor_ship
 from DataProcessor.Ship_FVessel_preprocess import DatasetProcessor_ship_FVessel
 
+from MetaLearning.maml import MAML
+
 
 class processor(object):
     def __init__(self, args):
@@ -286,6 +288,7 @@ class processor(object):
                 support_loss, query_loss = 0,0
             elif self.args.stage == 'MGTP':
                 train_loss = self.train_MGTP_epoch_new(epoch)
+                # train_loss = self.train_MGTP_effictive_epoch_new(epoch)
                 support_loss,query_loss = 0,0
             elif self.args.stage == 'MGTPAligin':
                 train_loss = self.train_MGTPAligin_epoch_new(epoch)
@@ -390,7 +393,8 @@ class processor(object):
             loss_kl_list +=  loss_kl
             loss_diversity_list += loss_diverse
             loss_TT_list += loss_TT
-            loss_epoch += loss.item()
+            # 因为loss的值可能变化，为1或正常值，故而此处修改其记录值
+            loss_epoch += (loss_pred+loss_recover+loss_kl+loss_diverse+loss_TT)
             # 损失反向传播 梯度裁剪 优化器的step函数
             loss.backward()
             """
@@ -596,6 +600,7 @@ class processor(object):
                 names_weights_copy = self.get_inner_loop_parameter_dict(self.net.named_parameters())
                 grads = torch.autograd.grad(support_total_loss, names_weights_copy.values(), create_graph=True,
                                             retain_graph=True, allow_unused=True)
+                # todo ！！copy.deepcopy：使用deepcopy克隆模型将会断开与原始模型参数的计算图连接，使得无法直接计算梯度从克隆模型回传到原始模型。
                 new_model = copy.deepcopy(self.net).train().cuda()
                 # 在直接操作.grad属性之前，确保它不是None。如果是None，你需要先初始化它为0。可能错误在于此时的self.net的grad与grads的梯度不一样
                 """
@@ -831,6 +836,85 @@ class processor(object):
                 self.logger.info(f'train-{batch_id}/{len(self.dataloader.train_batch_MVDG_task)} (epoch {epoch}),task_query_loss = {task_query_loss.item():.5f},time/batch = {end - start:.5f}')
         train_loss_epoch = loss_epoch / len(self.dataloader.train_batch_MVDG_task)
         return train_loss_epoch
+
+    def train_MGTP_effictive_epoch_new(self, epoch):
+        """
+        基于MGTP的代码 添加对应的l2l的代码库内容
+        ==》仍然会有多个报错：
+        RuntimeError: the derivative for '_cudnn_rnn_backward' is not implemented. Double backwards is not supported for CuDNN RNNs due to limitations in the CuDNN API. To run double backwards, please disable the CuDNN backend temporarily while running the forward pass of your RNN. For example:
+        1）with torch.backends.cudnn.flags(enabled=False):
+            output = model(inputs)
+        2）UserWarning: The .grad attribute of a Tensor that is not a leaf Tensor is being accessed. Its .grad attribute won't be populated during autograd.backward(). If you indeed want the gradient for a non-leaf Tensor, use .retain_grad() on the non-leaf Tensor.
+        If you access the non-leaf Tensor by mistake, make sure you access the leaf Tensor instead. See github.com/pytorch/pytorch/pull/30531 for more informations.
+        """
+        # 第一步依据完整数据拆分出tra，batch，task
+        self.dataloader.reset_batch_pointer(set='train', valid=False)
+        loss_epoch = 0
+        MVDG_optimizers = torch.optim.Adam(self.net.parameters(), lr=self.args.outer_learning_rate)
+        self.net.zero_grad()
+        fast_models = []
+        # 数据租住方式与MVDG是一样的，不一样的只有单个task的处理方式
+        for batch_id, batch_data in tqdm(enumerate(self.dataloader.train_batch_MVDG_task),
+                                         total=len(self.dataloader.train_batch_MVDG_task),
+                                         desc="Processing MGTP Batches"):
+            # 每个batch数据包含3个traj
+            # self.logger.info(f'begin{epoch},batch_traj{batch_id}')
+            start = time.time()
+            # 此处每个traj——data有4个task
+            task_query_loss = []
+            for traj_id, traj_data in enumerate(batch_data):
+                # 一个轨迹里出一个系数
+                # self.logger.info(f'begin{epoch},batch_traj{batch_id},optim_traj{traj_id}')
+                fast_model = MAML(self.net,lr=self.args.inner_learning_rate)
+                fast_opts = torch.optim.Adam(fast_model.parameters(), lr=self.args.outer_learning_rate,
+                                             betas=(0.9, 0.999),weight_decay=5e-4)
+                # 每个task内包含一个support和query
+                traj_query_loss = []
+                for task_id, task_data in enumerate(traj_data):
+                    # 多个任务的话 反复更新 级联形式
+                    support_set_inital,query_set_inital = task_data[1],task_data[0]
+                    fast_opts.zero_grad()
+                    task_model = fast_model.clone()  # torch.clone() for nn.Modules
+                    # 1.计算support-loss
+                    support_total_loss, support_loss_pred, support_loss_recover, support_loss_kl, \
+                    support_loss_diverse, support_loss_TT = self.process_set(task_model,support_set_inital,'support')
+                    # 2.更新fast-model 单向梯度更新
+                    task_model.adapt(support_total_loss,first_order=True,allow_unused=True,allow_nograd=True)  # computes gradient, update task_model in-place
+                    # 3.计算query-loss
+                    query_total_loss, query_loss_pred, query_loss_recover, query_loss_kl, \
+                    query_loss_diverse, query_loss_TT = self.process_set(task_model,query_set_inital,'query')
+                    traj_query_loss.append(query_total_loss)
+                    # 4.更新fast-model
+                    task_loss = support_total_loss + query_total_loss
+                    task_loss.backward()
+                    torch.nn.utils.clip_grad_norm_(task_model.parameters(), self.args.clip)
+                    fast_opts.step()
+                task_query_loss.append(torch.mean(torch.stack(traj_query_loss)))
+                parameters = dict(fast_model.named_parameters())
+                fast_models.append(parameters)
+            task_query_loss = torch.mean(torch.stack(task_query_loss))
+            # self.logger.info(f'task_query_loss:{task_query_loss.item()}')
+            loss_epoch += task_query_loss.item()
+            # parameters字典中的值是模型参数tensor的直接引用,不是copy。
+            # 所以修改字典值实际上就是在修改模型参数内存中的tensor值。
+            MVDG_params = dict(self.net.named_parameters())
+            MVDG_optimizers.zero_grad()
+            # update_grad
+            for k in MVDG_params.keys():
+                new_v, old_v = 0, MVDG_params[k]
+                for m in fast_models:
+                    new_v += m[k]
+                new_v = new_v / len(fast_models)
+                MVDG_lr = 1
+                MVDG_params[k].grad = ((old_v - new_v) / MVDG_lr).data
+            torch.nn.utils.clip_grad_norm_(self.net.parameters(), self.args.clip)
+            MVDG_optimizers.step()
+            end = time.time()
+            if batch_id % self.args.show_step == 0 and self.args.ifshow_detail:
+                self.logger.info(f'train-{batch_id}/{len(self.dataloader.train_batch_MVDG_task)} (epoch {epoch}),task_query_loss = {task_query_loss.item():.5f},time/batch = {end - start:.5f}')
+        train_loss_epoch = loss_epoch / len(self.dataloader.train_batch_MVDG_task)
+        return train_loss_epoch
+
 
     def train_MGTPAligin_epoch_new(self, epoch):
         """

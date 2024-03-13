@@ -444,11 +444,16 @@ class Dual_TT(STAR_CVAE):
         diverse_pred_traj, _ = self.decoder(past_feature_repeat, pz_sampled, node_past, sample_num=self.args.sample_num,
                                             mode='inference')
         loss_diverse = self.calculate_loss_diverse(diverse_pred_traj, node_future)
-        # total-loss!!
-        total_loss = loss_pred + loss_recover + loss_kl + loss_diverse + loss_TT
+        # total-loss!! loss的组合设计
+        total_loss_origin = loss_diverse + loss_pred + loss_recover + loss_kl + loss_TT
+        total_loss_1 = loss_diverse/loss_diverse.detach() + loss_pred/loss_pred.detach() + loss_recover/loss_recover.detach() \
+                     + loss_kl/loss_kl.detach() + loss_TT/loss_TT.detach()
+        total_loss_ori1 = loss_diverse + loss_pred/(loss_pred/loss_diverse).detach() + loss_recover/(loss_recover/loss_diverse).detach() \
+                          + loss_kl/(loss_kl/loss_diverse).detach() + loss_TT/(loss_TT/loss_diverse).detach()
+
         # 不同的参数组合设计 todo
         # total_loss = 1.5*loss_pred + loss_recover + loss_kl + 2.0*loss_diverse
-        return total_loss, loss_pred.item(), loss_recover.item(), loss_kl.item(), loss_diverse.item(),loss_TT.item()
+        return total_loss_origin, loss_pred.item(), loss_recover.item(), loss_kl.item(), loss_diverse.item(),loss_TT.item()
 
     def inference(self, inputs):
         # 这是一个模型推理方法的实现。该方法接收包含过去轨迹的数据，并根据学习到的先验和给定的过去轨迹输出多样化的预测轨迹。
