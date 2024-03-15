@@ -153,6 +153,7 @@ def split_at_fragment_lambda(x, frag_idx, gb_frag):
      """
     metaId = x.metaId.iloc()[0]
     counter = 0
+    x['newMetaId'] =  x['newMetaId'].astype(str)
     if metaId in frag_idx:
         split_idx = gb_frag.groups[metaId]
         for split_id in split_idx:

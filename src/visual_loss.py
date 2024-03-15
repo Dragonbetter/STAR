@@ -17,6 +17,7 @@ def draw_loss(file_path,epoch,show=False):
     # 首先，我们需要找到最后一个从0开始的epoch的位置
     # 我们将反向遍历文件，找到第一个出现的epoch为0的行，这标志着最新的实验或运行的开始
     # 由于DataFrame已经加载，我们可以从底部向上查找epoch为0的行
+    # todo 需要解决一个问题，即当其不存在epoch为0的行时 需要进行处理 可能是基于某个新epoch开始load的
     last_zero_epoch_index = data[data['epoch'] == 0].index[-1]  # 获取最后一个epoch为0的行的索引
     # 现在，我们将数据裁剪到这个索引之后的部分，这代表最新的运行数据
     # 只绘画截止对应epoch的数据

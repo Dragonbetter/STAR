@@ -24,9 +24,10 @@ from DataProcessor.NBA_preprocess import DatasetProcessor_NBA
 from DataProcessor.Soccer_preprocess import DatasetProcessor_Soccer
 from DataProcessor.Ship_preprocess import DatasetProcessor_ship
 from DataProcessor.Ship_FVessel_preprocess import DatasetProcessor_ship_FVessel
+from DataProcessor.ApolloScale_preprocess import DatasetProcessor_ApolloScale
 
 from MetaLearning.maml import MAML
-
+from torch.profiler import profile, record_function, ProfilerActivity
 
 class processor(object):
     def __init__(self, args):
@@ -45,6 +46,8 @@ class processor(object):
             self.dataloader = DatasetProcessor_ship(args)
         elif self.args.dataset == "Ship_FVessel":
             self.dataloader = DatasetProcessor_ship_FVessel(args)
+        elif self.args.dataset == "ApolloScale":
+            self.dataloader = DatasetProcessor_ApolloScale(args)
         else:
             raise ValueError("Unknown dataset type")
 
@@ -269,7 +272,14 @@ class processor(object):
         # 根据当前stage打开相应的日志文件
         self.current_log_file_path = os.path.join(self.args.model_dir, self.log_files[self.args.stage])
         self.current_log_file = open(self.current_log_file_path, 'a+')
-
+        # 初始化 Profiler 确认循环次数足够 Profiler 进入激活状态。 wait=1, warmup=1, active=3
+        # 至少需要运行 5 个 epoch（1 个等待，1 个预热，3 个激活），Profiler 才会完成一次完整的性能数据收集周期。如果你的训练循环的 epoch 数小于这个值，Profiler 将不会进入激活状态，或者可能不会记录足够的性能数据。
+        self.logger.info(f"当前工作目录：{os.getcwd()}")
+        #with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], 
+        #    schedule=torch.profiler.schedule(wait=1, warmup=1, active=1),
+        #    on_trace_ready=torch.profiler.tensorboard_trace_handler('/mnt/sda/euf1szh/STAR/result/logs'), # 保存日志至./logs目录
+        #    record_shapes=True,
+        #    with_stack=True) as prof:
         for epoch in range(epoch_start, self.args.num_epochs):
             self.net.train()
             if self.args.stage == 'origin':
@@ -324,6 +334,8 @@ class processor(object):
                 file_star_cvae_curve = open(os.path.join(self.args.model_dir, 'star_cvae_log_curve.txt'), 'a+')
                 support_query_log_curve.close()
                 support_query_log_curve = open(os.path.join(self.args.model_dir,'support_query_log_curve.txt'),'a+')
+            #  prof.step()  # 更新 profiler
+            # 完成所有训练之后的loss绘画分析
         # 完成所有训练之后的loss绘画分析
         draw_loss(os.path.join(self.args.model_dir, 'star_cvae_log_curve.txt'),self.args.num_epochs)
         draw_loss(os.path.join(self.args.model_dir, 'star_cvae_log_curve.txt'), int(self.args.num_epochs/5))
@@ -757,6 +769,7 @@ class processor(object):
             for traj_id, traj_data in enumerate(batch_data):
                 # 一个轨迹里出一个系数
                 # self.logger.info(f'begin{epoch},batch_traj{batch_id},optim_traj{traj_id}')
+                # todo 一个可能的优化是直接在原模型上进行参数的软更新，而不是使用深度复制的模型。
                 fast_model = copy.deepcopy(self.net).train().cuda()
                 # 移除 !
                 fast_opts = torch.optim.Adam(fast_model.parameters(), lr=self.args.inner_learning_rate,
@@ -789,6 +802,8 @@ class processor(object):
                     self.load_model_with_selective_strictness(new_fast_model, new_inner_dict)
                     new_fast_model.zero_grad()
                     fast_model.zero_grad()
+                    # todo 考虑在每次迭代后手动释放不再需要的中间变量和梯度。torch.cuda.empty_cache()可以清理由PyTorch分配但当前未由分配器管理的缓存显存。这可以在某些情况下释放显存 
+                    # 频繁调用empty_cache()可能会导致训练过程中出现性能下降，因为它会使得CUDA设备的显存分配和释放操作变得更加频繁和复杂。
                     del grads, inner_dict_grads, new_inner_dict
                     # 3.计算query-loss
                     query_total_loss, query_loss_pred, query_loss_recover, query_loss_kl, \
