@@ -3,83 +3,61 @@ import numpy as np
 import pickle
 import random
 import pandas as pd
-import os
-from src.Visual import SDD_traj_vis
-from DataProcessor.SDD_preprocess import split_fragmented,filter_short_trajectories,sliding_window
 
 from DataProcessor.DataProcessorFactory import DatasetProcessor_BASE
-
-def read_trajectory_origin(folder_path):
-    """
-    读取原始数据
-    :param filename:
-    :return:
-    """
-    # 初始化数据字典
-    data = {}
-    # 定义列名
-    columns = [
-        'frame', 'trackId', 'label', 'x', 'y',
-        'position_z', 'object_length', 'object_width', 'object_height', 'heading'
-    ]
-    # 遍历文件夹中的每个文件
-    for filename in os.listdir(folder_path):
-        # 检查文件扩展名是否为.txt
-        if filename.endswith('.txt'):
-            # 构建完整的文件路径
-            file_path = os.path.join(folder_path, filename)
-            
-            # 读取txt文件到DataFrame，假设数据是用逗号分隔的
-            df = pd.read_csv(file_path, names=columns, delimiter=' ')
-            
-            # 使用文件名（不包括扩展名）作为字典的键
-            key_name = os.path.splitext(filename)[0]
-            
-            # 将DataFrame存储到字典中
-            data[key_name] = df
-    # 现在，`data`字典包含了所有文件的数据，其中键是文件名，值是对应的DataFrame
-    for key in data:
-        data[key]['sceneId'] = key  # 'source'是新列的列名，存储每个DataFrame对应的文件名（即字典的键）
-    # 第二步：合并所有DataFrame到一个大的DataFrame中
-    all_data_df = pd.concat(data.values(), ignore_index=True)
-    # 第三步：删除不需要的列
-    columns_to_drop = ['position_z', 'object_length', 'object_width', 'object_height', 'heading']
-    all_data_df.drop(columns=columns_to_drop, inplace=True)  
-    return all_data_df
+from DataProcessor.ApolloScale_preprocess import read_trajectory_origin
+from DataProcessor.SDD_preprocess import split_fragmented,filter_short_trajectories,sliding_window
 
 
-class DatasetProcessor_ApolloScale(DatasetProcessor_BASE):
+
+class DatasetProcessor_ETH_Apollo(DatasetProcessor_BASE):
     def __init__(self,args):
-        """
-        """
         super().__init__(args=args)
-        assert self.args.dataset == "ApolloScale"
-        print("正确完成真实数据集" + self.args.dataset + "的初始化过程")
-            # 复用的代码结构
-        """
-        # 基础结构类
-        # def __init__
-        # def reset_batch_pointer(self, set, valid=False):
-        =====数据打包处理保存类
-        # def load_dict(self,data_file):
-        # def load_cache(self, cachefile):
-        # def pick_cache(self):
-        =====数据训练过程中获取类
-        # def rotate_shift_batch(self, batch_data, ifrotate=True)
-        # def get_train_batch(self, idx)
-        # def get_test_batch(self, idx)
-        =====通用结构类 
-        # def get_data_index(self, data_dict, setname, ifshuffle=True)
-        # def get_data_index_single(self,seti,data_dict, setname, ifshuffle=True):
-        # def find_trajectory_fragment(self, trajectory, startframe, seq_length, skip,return_len)
-        =====顶层设计类
-        # def data_preprocess_for_originbatch(self, setname):
-        # def data_preprocess_for_MVDGtask(self,setname):
-        # def data_preprocess_for_originbatch_split(self):
-        =====batch数据形成类
-        # def massup_batch(self,batch_data):
-        # def get_social_inputs_numpy_HIN(self)
-        """
+        assert  self.args.dataset == "ETH_Apollo"
+        print("正确完成真实数据集"+self.args.dataset+"的初始化过程")
+    # 复用的代码结构
+    """
+    # def __init__
+    # def reset_batch_pointer(self, set, valid=False):
+
+    =====数据打包处理保存类
+    # def load_dict(self,data_file):
+    # def load_cache(self, cachefile):
+    # def pick_cache(self):
+    =====数据训练过程中获取类
+    # def rotate_shift_batch(self, batch_data, ifrotate=True)
+    # def get_train_batch(self, idx)
+    # def get_test_batch(self, idx)
+    =====通用结构类 
+    # def get_data_index(self, data_dict, setname, ifshuffle=True)
+    # def get_data_index_single(self,seti,data_dict, setname, ifshuffle=True):
+    # def find_trajectory_fragment(self, trajectory, startframe, seq_length, skip)
+    =====通用结构类 
+    # def data_preprocess_for_originbatch(self, setname):
+    # def data_preprocess_for_MVDGtask(self,setname):
+    # def data_preprocess_for_originbatch_split(self):
+    =====batch数据形成类
+    # def massup_batch(self,batch_data):
+    # def get_social_inputs_numpy_HIN(self)
+    
+    """
+
+    # =====================================================================
+    # 下面的方法都必须重新实现------------------------------------------
+    # 注意的是数据来源不同！参数也不同
+    def data_preprocess_for_origintrajectory(self, args):
+        # 完成eth-train数据和SDD-test数据的加载以及处理工作
+        # train
+        self.train_dir = ['./data/eth/univ', './data/eth/hotel', './data/ucy/zara/zara01',
+                          './data/ucy/zara/zara02', './data/ucy/univ/students001', './data/ucy/univ/students003',
+                          './data/ucy/univ/uni_examples', './data/ucy/zara/zara03']
+        self.train_skip = [6, 10, 10, 10, 10, 10, 10, 10]
+        # neighbor_thred = 10 /500
+
+        # SDD==>注意两个阈值不同
+        self.test_dir = './data/ApolloScale/prediction_test'
+        self.test_skip = [1,1,1,1,1,1,1,1,1,1,1] # todo可能这里的skip的数量不一样 不是单独一个 需要进行扩充到多个10个场景 test
+    
     def data_preprocess_for_ApolloScale(self, data_path, window_size, stride):
         data = read_trajectory_origin(data_path)
         # 将scene-id和trackid两列拼接起来，并用下划线连接，形成一个新的字符串，最后将所有字符串组成一个新的列表，作为rec&trackId列的值。
@@ -104,54 +82,71 @@ class DatasetProcessor_ApolloScale(DatasetProcessor_BASE):
         data_sliding = data_sliding.drop(columns=['trackId'])
         # 划分训练和测试数据集 
         return data_sliding
-          
-    def data_preprocess_for_origintrajectory(self,args):
-        """
-        完成从最原始数据（txt）到初步处理的过程
-        完成原traject——preprocess 工作
-        ===============================
-        1.获取数据存取位置
-        ./data/ApolloScale/prediction_test
-        ./data/ApolloScale/prediction_train
-        2.配置基本实验设置
-        obs_length,future_length,
-        3.数据基本格式分析：
-        object_type	small vehicles	big vehicles	pedestrian	motorcyclist and bicyclist	others
-        ID	1	2	3	4	5
-        1）train:
-        53个文件，每个文件1分钟的数据，单独训练；
-        数据格式为：
-         frame_id, object_id, object_type, position_x, position_y, position_z, object_length, object_width, object_height, heading.
-        ==>正常处理即可
-        2)test:
-         包含prediction——result（预测数据）和prediction——gt(为对应的真值数据)，以及相对应的object-id数据；
-        表示该物体需要被考虑。
-        从200开始往后：200-205；212-217 如此划分obs；即我需要先合并相应的两个文件的数据，而后按照12进行断开，
-        并依据object-id的数据，将
-        """
-        self.args.seq_length = 12
-        self.args.obs_length = 6
-        self.args.pred_length = 6
-        self.SDD_skip = 1 # 不需要应该 ？
-        self.args.relation_num = 1
-        window_size, stride = 12,12
-        train_data_path = './data/ApolloScale/prediction_train'
-        test_data_path = './data/ApolloScale/prediction_test'
-        print('Training data proprecess')
-        self.apollo_train_data = self.data_preprocess_for_ApolloScale(train_data_path, window_size, stride)
-        print('Testing data proprecess')
-        self.apollo_test_data = self.data_preprocess_for_ApolloScale(test_data_path,window_size,stride)
 
-    def data_preprocess_for_transformer(self, setname):
-        if setname=="train":
-            data = self.apollo_train_data
-            data_file = self.train_data_file
-        elif setname=="test":
-            data = self.apollo_test_data
-            data_file = self.test_data_file
-        else:
-            raise ValueError("setname must be 'train' or 'test'")
-        print("处理__" + setname + "__数据")
+
+    def data_preprocess_for_ETH(self,data_dirs,data_file):
+        frameped_dict = []   # peds id contained in a certain frame
+        pedtrajec_dict = []  # trajectories of a certain ped
+        scene_list = []      # 场景名称列表
+        pedlabel_dict = []   # label of a certain ped
+        for seti, directory in enumerate(data_dirs):
+            # ----------------读取基础数据
+            # 4 （frame，Ped-ID y x）
+            file_path = os.path.join(directory, 'true_pos_.csv')
+            # Load the data from the csv file
+            data = np.genfromtxt(file_path, delimiter=',')
+            # -------------- 处理成四个类别的数据
+            # 获取当前数据集中所有行人的 ID
+            Pedlist = np.unique(data[1, :]).tolist()
+            # Add the list of frameIDs to the frameList_data
+            scene_id = directory.split('/')[-1]
+            print('preprocess  scene ' + scene_id + ' data')
+            scene_list.append(scene_id)
+            # 记录了当前数据集的每个帧包含了那些行人
+            frameped_dict.append({})
+            # 记录了每个行人的轨迹数据 （数据集，行人id，该行人的帧，对应帧下的xy数据）
+            pedtrajec_dict.append({})
+            pedlabel_dict.append({})
+            for ind, pedi in enumerate(Pedlist):
+                if ind % 100 == 0:
+                    print(ind, len(Pedlist))
+                # Extract trajectories of one person 抽取单人的轨迹数据
+                FrameContainPed = data[:, data[1, :] == pedi]
+                # Extract ped label
+                Label = "Pedestrian"
+                # Extract peds list
+                FrameList = FrameContainPed[0, :].tolist()
+                if len(FrameList) < 2:
+                    continue
+                # Initialize the row of the numpy array
+                # -----------计算获取每个行人的轨迹数据
+                Trajectories = []
+                # For each ped in the current frame
+                for fi, frame in enumerate(FrameList):
+                    # Extract their x and y positions
+                    # todo 按列筛选 后续也可以基于其运行的结果将其按数据集分开
+                    current_x = FrameContainPed[3, FrameContainPed[0, :] == frame][0]
+                    current_y = FrameContainPed[2, FrameContainPed[0, :] == frame][0]
+                    # Add their pedID, x, y to the row of the numpy array
+                    Trajectories.append([int(frame), current_x, current_y])
+                    # 如果当前帧不在frameped_dict中，则相应的添加该帧，并将该帧包含的行人添加；记录了当前数据集的每个帧包含了那些行人
+                    if int(frame) not in frameped_dict[seti]:
+                        frameped_dict[seti][int(frame)] = []
+                    frameped_dict[seti][int(frame)].append(pedi)
+                pedtrajec_dict[seti][pedi] = np.array(Trajectories)
+                # 保存对应的行人label维度
+                pedlabel_dict[seti][pedi] = Label
+        # ---------保存数据
+        f = open(data_file, "wb")
+        # 这两个对象序列化到文件中
+        pickle.dump((frameped_dict, pedtrajec_dict, scene_list, pedlabel_dict), f, protocol=2)
+        f.close()
+
+
+    def data_preprocess_for_Apollo(self,data_dirs,data_file):
+        window_size, stride = 12,12
+        data = self.data_preprocess_for_ApolloScale(data_dirs,window_size,stride)
+        # 后文与相应的Apollo,SDD的代码完全一样
         # 第二步：提取frame-dict与ped-dict
         SDD_origin_data = data.to_numpy().T
         # frame,label,x,y,sceneID,metaID => [frame,metaID,y,x,label,sceneID]
@@ -218,14 +213,30 @@ class DatasetProcessor_ApolloScale(DatasetProcessor_BASE):
         pickle.dump((frameped_dict, pedtrajec_dict, scene_list, pedlabel_dict), f, protocol=2)
         f.close()
 
+    def data_preprocess_for_transformer(self, setname):
+        # 需要分析当这三个值不一样时的情况，即依据train和test的设置分开，分析是否存在这对应的模型会被这个数量影响==>数据处理的时候也需要注意，因为
 
-    def data_preprocess_for_MLDGtask(self, setname):
-        # 从字符串"bookstore_0"中提取出"bookstore"
-        # 故而此处对应的应该基于apollo的scene-id进行处理分析
+        if setname=="train":
+            print("处理__"+setname+"__数据")
+            data_dirs = self.train_dir
+            data_file = self.train_data_file
+            self.args.seq_length = 12
+            self.args.obs_length = 6
+            self.args.pred_length = 6
+            self.data_preprocess_for_ETH(data_dirs,data_file)
+        elif setname=="test":
+            print("处理__"+setname+"__数据")
+            data_dirs = self.test_dir
+            data_file = self.test_data_file
+            self.args.seq_length = 12
+            self.args.obs_length = 6
+            self.args.pred_length = 6
+            self.data_preprocess_for_Apollo(data_dirs,data_file)
+    
+    def data_preprocess_for_MLDGtask(self,setname):
         """
-        不同的数据集作为MLDG的train时，结构是不一样的，因为其相应的划分的策略不一样！！注意apollo的划分策略
-                    基于data_preprocess_transformer将数据处理成MLDG可以运用的task结构类型
-                    完成原meta——task工作
+            基于data_preprocess_transformer将数据处理成MLDG可以运用的task结构类型
+            完成原meta——task工作
         """
         # 第一步 加载对应数据集以及相应参数
         # 第二步 按场景分解获取对应batch数据
@@ -233,57 +244,37 @@ class DatasetProcessor_ApolloScale(DatasetProcessor_BASE):
         trainbatch_meta = self.trainbatch_meta
         trainbatchnums_meta = self.trainbatchnums_meta
         cachefile = self.train_MLDG_batch_cache
-
-        scene_list = self.train_scene_list
         # 第三步 形成task-list
         task_list = []
         for seti, seti_batch_num in enumerate(trainbatchnums_meta):
-            if trainbatchnums_meta[seti] == 0 or trainbatchnums_meta[seti] == []:
+            # 此处会有不同 ETH-UCY数据集直接移除相应的i即可 但是针对于SDD数据集,需要先聚合相同场景的代码
+            if trainbatchnums_meta == 0 or trainbatchnums_meta[seti] == []:
                 continue
             query_seti_id = list(range(len(trainbatchnums_meta)))
-            # 第一步依据seti以及对应的scene-list找出与set相同的场景，其他不同的加入到query——seti-id里
-            # ======SDD
-            scene_now = scene_list[seti]
-            # 从字符串"'result_9052_1_frame'"中提取出"'result_9052'"
-            scene_now = scene_now[:11]
-            for i in range(len(scene_list)):
-                scene_find = scene_list[i][:11]
-                if scene_find == scene_now:
-                    query_seti_id.remove(i)
-            # ======SDD
+            #====ETH_UCY
+            query_seti_id.remove(seti) # ETH5
+            #====ETH_UCY
             for batch_id in range(seti_batch_num):
                 support_set = trainbatch_meta[seti][batch_id]
                 # support-set 为tuple 包含tuple和list，tuple中又有0,1,2,3个ndarray和1个list
-                if len(support_set[0][0]) == 0 or len(support_set) == 0:  # 需要深入分析
+                if len(support_set) == 0  or len(support_set[0][0]) == 0:  # 需要深入分析
                     continue
                 for query_i in range(self.args.query_sample_num):
                     random_query_seti = random.choice(query_seti_id)
-                    # 判断顺序的问题 先判断有无 在继续判断[0][0] 因为如果该数据为None，则对应的[0][0]其实是会导致list index out of range
-                    while len(trainbatch_meta[random_query_seti]) == 0 or len(trainbatch_meta[random_query_seti][0][0]) == 0 :
+                    while len(trainbatch_meta[random_query_seti]) == 0 or len(trainbatch_meta[random_query_seti][0][0]) == 0:
                         random_query_seti = random.choice(query_seti_id)
                     random_query_seti_batch = random.randint(0, trainbatchnums_meta[random_query_seti] - 1)
                     query_set = trainbatch_meta[random_query_seti][random_query_seti_batch]
                     task_list.append((support_set, query_set,))
         # todo 最开始是按顺序获取task，获取完毕后打乱task  针对于sequential 不太适合 因为batch中的4个query task不一样，无法充分利用query数据
         # random.shuffle(task_list)
-        batch_task_list = [task_list[i:i + self.args.query_sample_num] for i in
-                           range(0, len(task_list), self.args.query_sample_num)]
+        batch_task_list = [task_list[i:i + self.args.query_sample_num] for i in range(0, len(task_list), self.args.query_sample_num)]
         batch_task_num = len(batch_task_list)
-        self.pick_cache(trainbatch=batch_task_list, trainbatch_nums=batch_task_num, cachefile=cachefile)
+        self.pick_cache(trainbatch=batch_task_list,trainbatch_nums=batch_task_num,cachefile=cachefile)
 
-
+    
+    # 复用ETH-UCY的 但需要调试一下test-skip的值  
     def get_seq_from_index_balance(self, frameped_dict, pedtraject_dict, pedlabel_dict,data_index,scene_list,setname):
-        if self.args.HIN:
-            print("MLDG任务中生成的数据是基于HIN的")
-            batch = self.get_seq_from_index_balance_HIN(frameped_dict=frameped_dict,pedtraject_dict=pedtraject_dict,
-                        pedlabel_dict=pedlabel_dict,scene_list=scene_list,data_index=data_index, setname=setname)
-        else :
-            print("MLDG任务中生成的数据是基于同质图的")
-            batch = self.get_seq_from_index_balance_origin(frameped_dict=frameped_dict,pedtraject_dict=pedtraject_dict,
-                        pedlabel_dict=pedlabel_dict,scene_list=scene_list,data_index=data_index, setname=setname)
-        return batch
-        
-    def get_seq_from_index_balance_origin(self, frameped_dict, pedtraject_dict, pedlabel_dict,data_index,scene_list,setname):
         """
         完成get_seq_from_index_balance / get_seq_from_index_balance_meta工作
         Query the trajectories fragments from data sampling index.
@@ -300,8 +291,20 @@ class DatasetProcessor_ApolloScale(DatasetProcessor_BASE):
         """
         batch_data_mass, batch_data, Batch_id = [], [], []
         ped_cnt, last_frame = 0, 0
-        # 注意此处的skip 在不同数据集的差异
-        skip = self.SDD_skip
+        # 注意此处的skip neighbor_thred 在不同数据集的差异
+        if(setname=='train'): 
+            skip = self.train_skip
+            self.args.neighbor_thred = 10
+            self.args.seq_length = 12
+            self.args.obs_length = 6
+            self.args.pred_length = 6
+        else:
+            skip=self.test_skip
+            self.args.neighbor_thred = 10
+            self.args.seq_length = 12
+            self.args.obs_length = 6
+            self.args.pred_length = 6
+
         # 全局处理 混合所有train的帧 形成的windows
         for i in range(data_index.shape[1]):
             '''
@@ -312,7 +315,7 @@ class DatasetProcessor_ApolloScale(DatasetProcessor_BASE):
             framestart_pedi = set(frameped_dict[cur_set][cur_frame])
             # 计算并获取对应起始帧（子轨迹）的结束帧，由于当前的子轨迹的结束帧可能会超过数据集的范围，因此使用try-expect语句块处理这种情况
             try:
-                frameend_pedi = set(frameped_dict[cur_set][cur_frame + (self.args.seq_length - 1) * skip]) #todo 尽量后续统一skip形式
+                frameend_pedi = set(frameped_dict[cur_set][cur_frame + (self.args.seq_length - 1) * skip[cur_set]]) #todo 尽量后续统一skip形式
 
             except:
                 continue
@@ -332,7 +335,7 @@ class DatasetProcessor_ApolloScale(DatasetProcessor_BASE):
                 # cur-trajec：该行人对应的子轨迹数据（可能是完整的20，也可能小于20） iffull指示其是否满，ifexistobs指示其是否存在我们要求的观测帧
                 cur_trajec, iffull, ifexistobs = self.find_trajectory_fragment(pedtraject_dict[cur_set][ped],
                                                                                cur_frame, self.args.seq_length,
-                                                                               skip)
+                                                                               skip[cur_set])
                 if len(cur_trajec) == 0:
                     continue
                 if ifexistobs == False:
@@ -340,7 +343,6 @@ class DatasetProcessor_ApolloScale(DatasetProcessor_BASE):
                 if sum(cur_trajec[:, 0] > 0) < 5:
                     # filter trajectories have too few frame data
                     continue
-                # 此时cur-trajec为固定的（20,3）则[:,1:]保留xy数据，略去时间数据即（20,2）-》reshape为（20,1,2）数据
                 cur_trajec = (cur_trajec[:, 1:].reshape(-1, 1, 2),)
                 traject = traject.__add__(cur_trajec)
                 IFfull.append(iffull)
@@ -438,15 +440,15 @@ class DatasetProcessor_ApolloScale(DatasetProcessor_BASE):
             # batch_data_mass.append((batch_data, Batch_id,))
         return batch_data_mass
 
-
-    def get_seq_from_index_balance_HIN(self, frameped_dict, pedtraject_dict, pedlabel_dict,data_index,scene_list, setname):
-        # 无用
+    def massup_batch_HIN(self):
+        """
+            完成原massup_batch_HIN
+        """
         pass
 
-    def massup_batch_HIN(self, batch_data,type_data):
-        # 无用
+    def get_social_inputs_numpy_HIN(self):
+        """
+            完成原get_social_inputs_numpy_HIN
+        """
         pass
 
-    def get_social_inputs_numpy_HIN(self,  inputnodes, cur_type,relation_num):
-        # 无用
-        pass

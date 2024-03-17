@@ -10,19 +10,22 @@
             "args": [
                 "--dataset", "ApolloScale",
                 "--SDD_if_filter", "True",
-                "--test_set", "apolloscale",
+                "--test_set", "apollo",
                 "--neighbor_thred", "10",
-                "--device", "2",
+                "--device", "1",
                 "--phase", "train",
-                "--stage", "origin",
+                "--stage", "MLDG",
                 "--train_model", "Dual_TT",
                 "--batch_around_ped", "256",
                 "--batch_around_ped_meta", "256",
-                "--start_test", "75",
+                "--start_test", "0",
                 "--PE", "False",
                 "--num_epochs", "1000",
                 "--Dual_TT_ablation", "Dual_TT",
-                "--param_diff", "NoPE_MLP_DualTT_ApolloScale"
+                "--param_diff", "Apollo_test_qianyi",
+                "--seq_length", "12" ,
+                "--obs_length", "6" ,
+                "--pred_length", "6",
             ],
             "env": {
                 "PYTHONUNBUFFERED": "1"

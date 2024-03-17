@@ -25,6 +25,8 @@ from DataProcessor.Soccer_preprocess import DatasetProcessor_Soccer
 from DataProcessor.Ship_preprocess import DatasetProcessor_ship
 from DataProcessor.Ship_FVessel_preprocess import DatasetProcessor_ship_FVessel
 from DataProcessor.ApolloScale_preprocess import DatasetProcessor_ApolloScale
+from DataProcessor.ETH_SDD_preprocess import DatasetProcessor_ETH_SDD
+from DataProcessor.ETH_Apollo_preprocess import DatasetProcessor_ETH_Apollo
 
 from MetaLearning.maml import MAML
 from torch.profiler import profile, record_function, ProfilerActivity
@@ -48,6 +50,10 @@ class processor(object):
             self.dataloader = DatasetProcessor_ship_FVessel(args)
         elif self.args.dataset == "ApolloScale":
             self.dataloader = DatasetProcessor_ApolloScale(args)
+        elif self.args.dataset == "ETH_SDD":
+            self.dataloader = DatasetProcessor_ETH_SDD(args)
+        elif self.args.dataset == "ETH_Apollo":
+            self.dataloader = DatasetProcessor_ETH_Apollo(args)
         else:
             raise ValueError("Unknown dataset type")
 
@@ -256,6 +262,33 @@ class processor(object):
                 test_error, test_final_error = self.test_new_sne_epoch()
         self.logger.info(f'Set{self.args.test_set},epoch{self.args.load_model},test_error{test_error},test_final_error{test_final_error}')
 
+    def change_pred_length(self, stage):
+        # 在做不同数据集的迁移实验的过程中，主要基于test的数据去决定相应的train数据用的模式 
+        if stage == 'train':
+            if self.args.dataset in ['ETH_UCY','SDD','ETH_SDD']:
+                self.args.seq_length = 20
+                self.args.obs_length = 8
+                self.args.pred_length = 12
+            elif self.args.dataset in ['ApolloScale','ETH_Apollo']:
+                self.args.seq_length = 12
+                self.args.obs_length = 6
+                self.args.pred_length = 6
+            else:
+                raise ValueError("Unkonw dataset type")
+        elif stage == 'test':
+            if self.args.dataset in ['ETH_UCY','SDD','ETH_SDD']:
+                self.args.seq_length = 20
+                self.args.obs_length = 8
+                self.args.pred_length = 12
+            elif self.args.dataset in ['ApolloScale','ETH_Apollo']:
+                self.args.seq_length = 12
+                self.args.obs_length = 6
+                self.args.pred_length = 6
+            else:
+                raise ValueError("Unkonw dataset type")
+        else:
+            raise ValueError("Unkonw stage type")
+
     def train(self):
         self.logger.info('Training begin')
         if self.args.load_model is not None:
@@ -282,6 +315,8 @@ class processor(object):
         #    with_stack=True) as prof:
         for epoch in range(epoch_start, self.args.num_epochs):
             self.net.train()
+            # 更改预测的长度 
+            self.change_pred_length(stage='train')
             if self.args.stage == 'origin':
                 train_loss,loss_pred_epoch,loss_recover_epoch,loss_kl_epoch,loss_diverse_epoch,loss_TT_epoch = self.train_epoch(epoch)
                 support_loss, query_loss = 0,0
@@ -305,8 +340,12 @@ class processor(object):
                 support_loss, query_loss = 0, 0
 
             if epoch >= self.args.start_test:
+                # 设置对应的参数改变 obs-length
+                # test 依据数据集的情况 进行修改分析 apollo
                 # 如果当前轮数大于或等于 args.start_test，则将模型设置为评估模式（self.net.eval()），后续每轮都会跑
                 self.net.eval()
+                # 更改预测的长度 
+                self.change_pred_length(stage='test')
                 # todo 这里的test-epoch的数据输入与最终的test的时候是一致的，那么其相应的不就是在训练的使用了测试数据吗，此处的数据应该是train分出来的val才对
                 if self.args.train_model == 'star':
                     test_error, test_final_error = self.test_epoch()
@@ -322,6 +361,7 @@ class processor(object):
                 # 如果 start_test 大于等于当前轮数，打印当前轮数的训练损失、ADE 和 FDE，否则则只打印训练损失。
                 self.logger.info(
                     f'epoch {epoch}, train_loss={train_loss:.9f}, ADE={test_error:.9f}, FDE={test_final_error:.9f}, Best_ADE={self.best_ade:.9f}, Best_FDE={self.best_fde:.9f} at Epoch {self.best_epoch}')
+
             else:
                 self.logger.info(f'epoch {epoch}, train_loss={train_loss:.9f}')
             # 将训练损失、ADE、FDE 和学习率等信息写入日志文件 log_file_curve 中
@@ -562,7 +602,7 @@ class processor(object):
             # 转换为Python标量并缓存，避免重复调用`.item()`
             task_query_loss_item = task_query_loss.item()
             task_support_loss_item = task_support_loss.item()
-            self.logger.info(f'task_query_loss: {task_query_loss_item}, task_support_loss: {task_support_loss_item}')
+            # self.logger.info(f'task_query_loss: {task_query_loss_item}, task_support_loss: {task_support_loss_item}')
             # 累加到对应的epoch级别的损失变量
             query_loss_epoch += task_query_loss_item
             support_loss_epoch += task_support_loss_item

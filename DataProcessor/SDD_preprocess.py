@@ -467,6 +467,7 @@ class DatasetProcessor_SDD(DatasetProcessor_BASE):
         print(os.getcwd())
         test_set =self.args.test_set
         # 第一步 ：处理最原始的数据
+        # 后续选择用哪个数据取决于测试数据集的值，如果是test是sdd则直接使用PECNet的数据
         # 运用的是SDD完整的全部数据 由自己从最原始的txt生成
         DATA_PATH = './data/SDD/sdd_full_data.pkl'
         # 运用的是PECNET带的数据
@@ -615,9 +616,10 @@ class DatasetProcessor_SDD(DatasetProcessor_BASE):
 
     def data_preprocess_for_MLDGtask(self, setname):
         """
+        不同的数据集作为MLDG的train时，结构是不一样的，因为其相应的划分的策略不一样！！注意apollo的划分策略
                     基于data_preprocess_transformer将数据处理成MLDG可以运用的task结构类型
                     完成原meta——task工作
-                """
+        """
         # 第一步 加载对应数据集以及相应参数
         # 第二步 按场景分解获取对应batch数据
         self.data_preprocess_for_originbatch_split()

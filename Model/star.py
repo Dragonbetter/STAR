@@ -72,7 +72,7 @@ class MultiheadAttention(nn.Module):
         # 在通过这个合并的权重矩阵进行变换后，我们通常会将结果切分成三个部分，每个部分都是32维的，分别对应于转换后的Q、K、V
         # 有效地利用了一个大矩阵同时对Q、K、V进行线性变换，而通过后续的操作（如切分）
         # todo 直接修改此处的参数 ！！将默认的True改成False =》保证参数不变的话 应该只需要在整个的梯度字典中寻找该对应的参数，而后将其变为None即可
-        self._qkv_same_embed_dim = False
+        self._qkv_same_embed_dim = True
         # self._qkv_same_embed_dim = self.kdim == embed_dim and self.vdim == embed_dim
 
         self.num_heads = num_heads
