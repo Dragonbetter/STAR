@@ -11,6 +11,7 @@ from Model.star_cvae import STAR_CVAE
 from Model.star_cvae_hin import STAR_CVAE_HIN
 from Model.DualTT import Dual_TT
 from Model.Dual_TT_Aligin import Dual_TTAligin
+from Model.Dual_TT_visatten import Dual_TT_visatten
 
 from src.Visual import draw_result_NBA,VISUAL_TSNE,draw_result_SDD,draw_result_SDD_comparison
 from src.visual_loss import draw_loss
@@ -68,6 +69,8 @@ class processor(object):
             self.net = Dual_TT(args)
         elif self.args.train_model == 'Dual_TTAligin':
             self.net = Dual_TTAligin(args)
+        elif self.args.train_model == 'Dual_TT_visatten':
+            self.net = Dual_TT_visatten(args)
         # todo 对于学习率优化方面 需要添加对应的内外循环各自的代码
 
         self.set_optimizer()
@@ -242,7 +245,7 @@ class processor(object):
         self.net.eval()
         if self.args.train_model == 'star':
             test_error, test_final_error = self.test_epoch()
-        elif self.args.train_model in ['new_star', 'new_star_hin','Dual_TT','Dual_TTAligin']:
+        elif self.args.train_model in ['new_star', 'new_star_hin','Dual_TT','Dual_TTAligin','Dual_TT_visatten']:
             test_error, test_final_error = self.test_new_epoch()
         self.logger.info(f'Set{self.args.test_set},epoch{self.args.load_model},test_error{test_error},test_final_error{test_final_error}')
 
@@ -252,7 +255,7 @@ class processor(object):
         self.net.eval()
         if self.args.train_model == 'star':
             test_error, test_final_error = self.test_epoch()
-        elif self.args.train_model in ['new_star', 'new_star_hin','Dual_TT','Dual_TTAligin']:
+        elif self.args.train_model in ['new_star', 'new_star_hin','Dual_TT','Dual_TTAligin','Dual_TT_visatten']:
             if self.args.vis == 'traj' or self.args.vis == 'traj_comparison':
                 if self.args.dataset == 'NBA':
                     test_error, test_final_error = self.test_new_visualNBA_epoch()
@@ -349,7 +352,7 @@ class processor(object):
                 # todo 这里的test-epoch的数据输入与最终的test的时候是一致的，那么其相应的不就是在训练的使用了测试数据吗，此处的数据应该是train分出来的val才对
                 if self.args.train_model == 'star':
                     test_error, test_final_error = self.test_epoch()
-                elif self.args.train_model in ['new_star', 'new_star_hin','Dual_TT','Dual_TTAligin']:
+                elif self.args.train_model in ['new_star', 'new_star_hin','Dual_TT','Dual_TTAligin','Dual_TT_visatten']:
                     test_error, test_final_error = self.test_new_epoch()
                 # 调用 test_epoch 函数计算模型在测试集上的 ADE 和 FDE，并将其存储在 test_error 和 test_final_error 变量中。
                 # 然后，判断当前的 FDE 是否优于历史最佳 FDE，如果是，则更新 best_ade、best_fde 和 best_epoch 变量的值，并调用 save_model 函数保存模型。
@@ -422,9 +425,14 @@ class processor(object):
                 total_loss, loss_pred, loss_recover, loss_kl, loss_diverse,_,_ = self.net.forward(inputs,stage='support',mean_list=[],var_list=[],ifmixup=False)
                 loss,loss_TT = total_loss,0
 
-            elif self.args.train_model=='Dual_TT':
+            elif self.args.train_model in ['Dual_TT']:
                 total_loss, loss_pred, loss_recover, loss_kl, loss_diverse,loss_TT = self.net.forward(inputs,stage='support')
                 loss = total_loss
+            
+            elif self.args.train_model in ['Dual_TT_visatten']:
+                total_loss, loss_pred, loss_recover, loss_kl, loss_diverse,loss_TT = self.net.forward(inputs,stage='support',batch_id = batch)
+                loss = total_loss
+
 
             elif self.args.train_model == 'star':
                 # 整体将序列中的最后一帧的数据删除 20帧-》19帧
@@ -543,7 +551,7 @@ class processor(object):
             total_loss, loss_pred, loss_recover, loss_kl, loss_diverse= self.new_star_forward(model, data,stage=stage)
         elif self.args.train_model == 'star':
             total_loss= self.star_mixup_forward(model, data,stage=stage)
-        elif self.args.train_model == 'Dual_TT':
+        elif self.args.train_model in ['Dual_TT','Dual_TT_visatten']:
             total_loss,loss_pred,loss_recover,loss_kl,loss_diverse,loss_TT = self.Dual_TT_forward(model,data,stage=stage)
         return total_loss,loss_pred,loss_recover,loss_kl,loss_diverse,loss_TT
 

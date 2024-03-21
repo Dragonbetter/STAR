@@ -64,7 +64,7 @@ def get_parser():
 
     parser.add_argument('--phase', default='train', help='Set this value to \'train\' or \'test\'')
     parser.add_argument('--train_model', default='star', type=str,
-                        help='Your ModelStrategy name star/new_star/new_star_hin/new_star_ship/Dual_TT/Dual_TTAligin')
+                        help='Your ModelStrategy name star/new_star/new_star_hin/new_star_ship/Dual_TT/Dual_TTAligin/Dual_TT_visatten')
     parser.add_argument('--load_model', default=None, type=str,
                         help="load pretrained ModelStrategy for test or training, 需要的时候相应传入str，会组成model_str进行后续计算")
 

@@ -4,11 +4,11 @@ import numpy as np
 # 场景名称
 scenes = ["Gates", "Little", "Nexus", "Coupa", "Bookstore", "DeathCircle", "Quad", "Hyang"]
 scenes = ["Gates", "Little", "Nexus", "Coupa", "Bookstore", "Quad", "Hyang", "DeathCircle"]
-# HSTTE的ADE/FDE数据
+# PECNet的ADE/FDE数据
 hstte_ade = [18.50, 21.36, 7.96, 7.49, 9.67, 5.29, 10.41, 20.80]
 hstte_fde = [32.69, 35.95, 12.97, 15.24, 16.52, 8.42, 17.31, 34.57]
 
-# HSTTE+MVL的ADE/FDE数据
+# Dual_TT的ADE/FDE数据
 hstte_mvl_ade = [15.50, 18.50, 7.41, 7.21, 9.12, 5.01, 9.91, 18.50]
 hstte_mvl_fde = [28.69, 32.05, 12.44, 14.11, 14.22, 7.88, 15.72, 30.02]
 # 差值
