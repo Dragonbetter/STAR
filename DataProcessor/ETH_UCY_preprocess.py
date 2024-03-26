@@ -51,7 +51,7 @@ class DatasetProcessor_ETH_UCY(DatasetProcessor_BASE):
         1.完成数据获取工作 划分训练 测试 与对应的skip数据
          """
 
-        self.data_dirs = ['./data/eth/univ', './data/eth/hotel', './data/ucy/zara/zara01',
+        self.data_dirs = ['./data/eth/eth', './data/eth/hotel', './data/ucy/zara/zara01',
                           './data/ucy/zara/zara02', './data/ucy/univ/students001', './data/ucy/univ/students003',
                           './data/ucy/univ/uni_examples', './data/ucy/zara/zara03']
         skip = [6, 10, 10, 10, 10, 10, 10, 10]
@@ -226,6 +226,8 @@ class DatasetProcessor_ETH_UCY(DatasetProcessor_BASE):
             仍然是以对应窗口序列划分 例如test有1443帧，则相应的可以划分处1443个时间窗口，但需要后期依据
             '''
             cur_frame, cur_set, _ = data_index[:, i]
+            if (cur_set == 2) and (cur_frame == 5360):
+                print('zara01??')
             cur_scene = scene_list[cur_set]
             framestart_pedi = set(frameped_dict[cur_set][cur_frame])
             # 计算并获取对应起始帧（子轨迹）的结束帧，由于当前的子轨迹的结束帧可能会超过数据集的范围，因此使用try-expect语句块处理这种情况
@@ -273,7 +275,7 @@ class DatasetProcessor_ETH_UCY(DatasetProcessor_BASE):
             cur_pednum = traject_batch.shape[1]
             print(self.args.dataset + '_' + setname + '_' + str(cur_pednum))
             ped_cnt += cur_pednum
-            # todo 后续基于batch-id进行数据提取
+            # todo 后续基于batch-id进行数据提取 进行可视化分析 
             batch_id = (cur_set, cur_frame,)
             """
             如果以当前数据集以及相应的预测帧起始的窗口中包含超过512个行人的轨迹，则将其进行拆分为两个batch，如果处于256和512之间，

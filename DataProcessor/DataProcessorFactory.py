@@ -215,7 +215,7 @@ class DatasetProcessor_BASE(ABC):
             raise NotImplementedError
 
     # batch获取类数据
-    def rotate_shift_batch(self, batch_data, ifrotate=True):
+    def rotate_shift_batch(self, batch_data, ifrotate=False):
         '''
         Random ration and zero shifting.
         数据旋转增强以及相应的以观测坐标进行坐标的移动归一化
@@ -239,7 +239,7 @@ class DatasetProcessor_BASE(ABC):
 
     def get_train_batch(self, idx):
         batch_data, batch_id = self.train_batch[idx]
-        batch_data = self.rotate_shift_batch(batch_data, ifrotate=self.args.randomRotate)
+        batch_data = self.rotate_shift_batch(batch_data, ifrotate=False)
 
         return batch_data, batch_id
 
@@ -316,6 +316,7 @@ class DatasetProcessor_BASE(ABC):
             total_frame += len(frames)
             # 添加一行 标记每个数据所属的数据集
             set_id.extend(list(seti for i in range(len(frames))))
+            # 删除了帧数据 但不影响 因为删除的是最终的不存在足够的后续帧来构成完整序列的帧）的帧编号。
             frame_id_in_set.extend(list(frames[i] for i in range(len(frames))))
 
         all_frame_id_list = list(i for i in range(total_frame))

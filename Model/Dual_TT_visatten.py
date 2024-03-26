@@ -8,7 +8,7 @@ from Model.CVAE_utils import Normal, MLP2, MLP
 from Model.star import _get_clones, TransformerEncoderLayer
 from Model.star_cvae import Decoder, STAR_CVAE
 from Model.DualTT import PositionalAgentEncoding
-from vis.vis_for_attention import draw_attention_map
+from vis.vis_for_attention_ori import draw_attention_map
 
 
 class TransformerEncoder(nn.Module):
@@ -188,8 +188,6 @@ class Dual_TT_visatten_Encoder(nn.Module):
         return fusion_feat,loss,qkv_dict,att_dict
 
 
-
-
 class Dual_TT_visatten(STAR_CVAE):
     def __init__(self, args):
         super(Dual_TT_visatten, self).__init__(args)
@@ -232,11 +230,14 @@ class Dual_TT_visatten(STAR_CVAE):
         updated_batch_pednum = self.update_batch_pednum(batch_pednum, node_index)
         # 依据updated-batch-pednum得出相应的每个windows中开始和结束的行人序列号，便于分开处理
         if batch_pednum.cpu().detach().numpy().shape[0] - updated_batch_pednum.cpu().detach().numpy().shape[0] > 0:
+            # 这排除的是一个小batch里的人员全是残缺的 但实际发现不会的 基本都是可以的 
             print(
                 'batch_pednum:' + str(batch_pednum.cpu().detach().numpy().shape) + '/' + 'updated_batch_pednum:' + str(
                     batch_pednum.cpu().detach().numpy().shape))
+        assert len(updated_batch_pednum) == len(batch_id)
         st_ed = self.get_st_ed(updated_batch_pednum)
         nodes_current = nodes_abs[:, node_index]
+        # 这行代码将nodes-current也同样的变化了==>tensor的引用传递问题 改成clone（）
         nodes_abs_position = self.mean_normalize_abs_input(nodes_current, st_ed)
         # 输入encoder的前置知识
         past_traj = nodes_current[:obs_length], nodes_abs_position[:obs_length], nei_list[:obs_length]
@@ -299,8 +300,38 @@ class Dual_TT_visatten(STAR_CVAE):
         # 不同的参数组合设计 todo
         # total_loss = 1.5*loss_pred + loss_recover + loss_kl + 2.0*loss_diverse
         # 这个可以等到后期相应的完全训练完后 再基于该数据去跑一遍 但是不更新数据！！即用好的参数在模型在跑一遍数据 
-        draw_attention_map(updated_batch_pednum,nei_list,nodes_current,past_att_dict,diverse_pred_traj,batch_id)
-        return total_loss, loss_pred.item(), loss_recover.item(), loss_kl.item(), loss_diverse.item(),loss_TT.item(),qkv_dict
+        # todo 后续训练完毕后进行分析并绘画最终的值 先保存每个bag的数据 而后继续分析
+        # self.save_dict(updated_batch_pednum,nei_list,nodes_current,past_att_dict,diverse_pred_traj,batch_id,test_set=self.args.test_set)
+        # draw_attention_map(updated_batch_pednum,nei_list,nodes_current,past_att_dict,diverse_pred_traj,batch_id,test_set=self.args.test_set)
+        return total_loss, loss_pred.item(), loss_recover.item(), loss_kl.item(), loss_diverse.item(),loss_TT.item()
+
+    def save_dict(self,updated_batch_pednum,nei_list,nodes_current,past_att_dict,diverse_pred_traj,batch_id,test_set):
+        """
+        将提供的数据打包成字典。
+        
+        参数:
+        - updated_batch_pednum: 更新后的批量行人数
+        - nei_list: 邻居列表
+        - nodes_current: 当前节点
+        - past_att_dict: 过去的注意力字典
+        - diverse_pred_traj: 多样化预测轨迹
+        - batch_id: 批次ID
+        - test_set: 测试集
+        
+        返回:
+        - 一个包含所有输入数据的字典
+        """
+        data_dict = {
+            'updated_batch_pednum': updated_batch_pednum,
+            'nei_list': nei_list,
+            'nodes_current': nodes_current,
+            'past_att_dict': past_att_dict,
+            'diverse_pred_traj': diverse_pred_traj,
+            'batch_id': batch_id,
+            'test_set': test_set
+        }
+        model_save_path = os.path.join(self.args.model_dir,f"{self.args.train_model}{str(stage)}_{str(self.args.test_set)}.tar")
+        torch.save(data_dict,model_save_path)
 
     def inference(self, inputs):
         # 这是一个模型推理方法的实现。该方法接收包含过去轨迹的数据，并根据学习到的先验和给定的过去轨迹输出多样化的预测轨迹。
@@ -321,7 +352,7 @@ class Dual_TT_visatten(STAR_CVAE):
         nodes_abs_position = self.mean_normalize_abs_input(nodes_current, st_ed)
         past_traj = nodes_current[:obs_length], nodes_abs_position[:obs_length], nei_list[:obs_length]
         # encoder
-        past_feature,past_qkv_dict,_ = self.past_encoder(past_traj)
+        past_feature,_,_,_ = self.past_encoder(past_traj)
         target_pred_traj = nodes_current[obs_length:]
         sample_num = self.args.sample_num
         # cvae

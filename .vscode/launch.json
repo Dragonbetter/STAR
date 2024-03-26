@@ -10,9 +10,9 @@
             "args": [
                 "--dataset", "ETH_UCY",
                 "--SDD_if_filter", "True",
-                "--test_set", "eth",
+                "--test_set", "hotel",
                 "--neighbor_thred", "10",
-                "--device", "1",
+                "--device", "2",
                 "--phase", "train",
                 "--stage", "origin",
                 "--train_model", "Dual_TT_visatten",

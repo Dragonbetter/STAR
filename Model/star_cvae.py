@@ -268,6 +268,7 @@ class STAR_CVAE(torch.nn.Module):
 
     def mean_normalize_abs_input(self, node_abs, st_ed):
         """
+        根据PyTorch的工作方式，张量（Tensors）是按引用传递的，这意味着如果你在函数内部修改了node_abs，那么传入的原始张量也会被修改。
         目标：是为了进行空间位置的归一化 即将属于同一个场景下的不同agent的轨迹数据归一化到同一个原点 这个原点的计算由不同agent轨迹数据的全部值共同决定
         :param node_abs: Absolute coordinates of pedestrians
         :type Tensor
@@ -276,7 +277,9 @@ class STAR_CVAE(torch.nn.Module):
         :return: node_abs: Normalized absolute coordinates of pedestrians
         :rtype: Tensor
         """
-        node_abs = node_abs.permute(1, 0, 2)
+        # 根据PyTorch的工作方式，张量（Tensors）是按引用传递的，这意味着如果你在函数内部修改了node_abs，那么传入的原始张量也会被修改。
+        node_abs = node_abs.clone().permute(1, 0, 2)  # 创建副本并重新排列
+        # node_abs = node_abs.permute(1, 0, 2)
         for st, ed in st_ed:
             mean_x = torch.mean(node_abs[st:ed, :, 0])
             mean_y = torch.mean(node_abs[st:ed, :, 1])

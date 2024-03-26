@@ -44,7 +44,7 @@ class DatasetProcessor_ETH_SDD(DatasetProcessor_BASE):
     def data_preprocess_for_origintrajectory(self, args):
         # 完成eth-train数据和SDD-test数据的加载以及处理工作
         # train
-        self.train_dir = ['./data/eth/univ', './data/eth/hotel', './data/ucy/zara/zara01',
+        self.train_dir = ['./data/eth/eth', './data/eth/hotel', './data/ucy/zara/zara01',
                           './data/ucy/zara/zara02', './data/ucy/univ/students001', './data/ucy/univ/students003',
                           './data/ucy/univ/uni_examples', './data/ucy/zara/zara03']
         self.train_skip = [6, 10, 10, 10, 10, 10, 10, 10]

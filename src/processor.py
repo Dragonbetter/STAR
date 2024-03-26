@@ -391,12 +391,14 @@ class processor(object):
         for batch in range(self.dataloader.train_batchnums):
 
             start = time.time()
-            # todo 获取对应训练batch的数据 相应的有旋转操作以及基于观测点位置坐标的归一化操作
+            # todo 获取对应训练batch的数据 相应的有旋转操作以及基于观测点位置坐标的归一化操作 ==> 不需要旋转！！
             inputs, batch_id = self.dataloader.get_train_batch(batch)
             # todo 每个batch单独的转移?数据传输很慢？
             # 将数据转成pytorch的tensor格式 转移到GPU上
             inputs = tuple([torch.Tensor(i) for i in inputs])
             inputs = self.to_device(inputs, self.device)
+            #batch_id = tuple([torch.Tensor(i) for i in batch_id])
+            #batch_id = self.to_device(batch_id, self.device)
             loss_pred_recover = torch.zeros(1,device=self.device)
             loss = torch.zeros(1,device=self.device)
             """
@@ -430,7 +432,7 @@ class processor(object):
                 loss = total_loss
             
             elif self.args.train_model in ['Dual_TT_visatten']:
-                total_loss, loss_pred, loss_recover, loss_kl, loss_diverse,loss_TT = self.net.forward(inputs,stage='support',batch_id = batch)
+                total_loss, loss_pred, loss_recover, loss_kl, loss_diverse,loss_TT = self.net.forward(inputs,stage='support',batch_id = batch_id)
                 loss = total_loss
 
 

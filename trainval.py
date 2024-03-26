@@ -82,7 +82,7 @@ def get_parser():
     parser.add_argument('--ifshow_detail', default=True, type=ast.literal_eval)
     parser.add_argument('--show_step', default=100, type=int)
     parser.add_argument('--ifsave_results', default=False, type=ast.literal_eval)
-    parser.add_argument('--randomRotate', default=True, type=ast.literal_eval,
+    parser.add_argument('--randomRotate', default=False, type=ast.literal_eval,
                         help="=True:random rotation of each trajectory fragment")
     # todo 此处不同的数据集 这个是否需要进行调整 eth-ucy用的是m sdd用的是pixel!!! 需要呀！ 你之前发现了咋不去调节 无语！
     parser.add_argument('--neighbor_thred', default=10, type=int)
@@ -103,7 +103,7 @@ def get_parser():
     # CVAE
     parser.add_argument('--ztype', default='gaussian', type=str, help='选择创建哪种分布类型的后验分布q(z|x,y)')
     parser.add_argument('--zdim', default=16, type=int, help='对应的z均值和方差的维度')
-    parser.add_argument('--min_clip', type=float, default=2.0) # KL散度设置
+    parser.add_argument('--min_clip', type=float, default=0.0) # KL散度设置
     parser.add_argument('--learn_prior', action='store_true', default=False,help='Dual_TT模型默认学习先验') # 学习先验分布
     # mixup
     parser.add_argument('--lam', type=float, default=0.05, help='在元测试时注入特征')
