@@ -432,7 +432,7 @@ class processor(object):
                 loss = total_loss
             
             elif self.args.train_model in ['Dual_TT_visatten']:
-                total_loss, loss_pred, loss_recover, loss_kl, loss_diverse,loss_TT = self.net.forward(inputs,stage='support',batch_id = batch_id)
+                total_loss, loss_pred, loss_recover, loss_kl, loss_diverse,loss_TT = self.net.forward(inputs,stage='support',batch_id = batch_id,batch=batch)
                 loss = total_loss
 
 

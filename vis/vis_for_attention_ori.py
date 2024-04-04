@@ -106,7 +106,8 @@ def draw_trajectory_on_scene_for_Temporal(group_list, batch_id, save_loc, image_
         # 只分析对应的eth场景 hotel作为test
         if data['scene'] in ('zara1', 'zara2', 'univ01', 'univ03', 'univ_examples', 'zara03'):
             continue
-
+        if data['trajectory'].shape[1] < 5:
+            continue
         H_scene = H[data['scene']]
         # 获取单应性矩阵的逆矩阵
         H_inv = np.linalg.inv(H_scene)
@@ -173,6 +174,9 @@ def draw_trajectory_on_scene_for_Temporal(group_list, batch_id, save_loc, image_
                 new_file_path2 = os.path.join(save_loc+"scene_"+str(data['scene'])+"_frame_"+str(data['frame'])+"_num_"+str(data['trajectory'].shape[1])+
                        '_'+image_name+".png")
                 plt.savefig(new_file_path2, dpi=300)
+                new_file_path3 = os.path.join(save_loc+"scene_"+str(data['scene'])+"_frame_"+str(data['frame'])+"_num_"+str(data['trajectory'].shape[1])+
+                       '_'+image_name+".svg")
+                plt.savefig(new_file_path3, dpi=300)
             else:
                 print("Error: Could not read frame.")
 
@@ -187,6 +191,9 @@ def draw_trajectory_on_scene_for_Spatial(group_list, batch_id, save_loc, image_n
         if data['scene'] in ['zara01','zara02','univ01','univ03','univ_examples','zara03']:
             continue
         # 该类型的数据不进行绘画
+        # 对于数据小于5个行人的不绘画
+        if data['trajectory'].shape[1] < 5:
+            continue
         # 2.获取单应性矩阵的逆矩阵
         H_scene = H[data['scene']]
         H_inv = np.linalg.inv(H_scene)
@@ -258,6 +265,10 @@ def draw_trajectory_on_scene_for_Spatial(group_list, batch_id, save_loc, image_n
                     new_file_path2 = os.path.join(save_loc+"scene_"+str(data['scene'])+"_frame_"+str(data['frame'])+"_id_"+
                         '_'+str(special_index)+"_" + image_name+".png")
                     plt.savefig(new_file_path2, dpi=300)
+                    new_file_path3 = os.path.join(save_loc+"scene_"+str(data['scene'])+"_frame_"+str(data['frame'])+"_id_"+
+                        '_'+str(special_index)+"_" + image_name+".svg")
+                    plt.savefig(new_file_path3, dpi=300)
+                    plt.close() # 关闭当前图像，避免内存消耗过大
             else:
                 print('Error: Could not read frame.')
 
@@ -275,9 +286,17 @@ def draw_points_and_line(data, color, shape):
         plt.plot([data[i, 0],data[i + 1, 0]],[data[i, 1],data[i + 1, 1]], color=color, alpha=0.5, linewidth=1)
 
 
-def draw_attention_map(updated_batch_pednum, nei_list, nodes_current, past_att_dict, diverse_pred_traj, batch_id, test_set):
+def draw_attention_map(updated_batch_pednum, nei_list, nodes_current, past_att_dict, diverse_pred_traj, batch_id, test_set,batch):
     # 0.预定义一些参数值
-    save_loc = "/mnt/sda/euf1szh/STAR/result/vis_atten/hotel/"
+    save_path_base = "/mnt/sda/euf1szh/STAR/result/vis_atten/debug_hotel/"
+    save_loc = os.path.join(save_path_base,f"batch_{batch}/")
+    # 检查路径是否存在
+    if not os.path.exists(save_loc):
+        # 路径不存在，创建文件夹
+        os.makedirs(save_loc)
+        print(f"文件夹'{save_loc}'已创建。")
+    else:
+        print(f"文件夹'{save_loc}'已存在。")
     color_select = ['Reds', 'Green', 'Blues','Greys','Plasma','Viridis','Cividis']
     # 'Plasma'：具有高亮度的彩色系列，适合科技和能量主题 'Viridis'：现代感的绿蓝黄渐变，对于色盲友好 'Cividis'：黄色到深蓝的渐变，也是色盲友好选项
     color_truth_past,color_truth_pred, color_pred = 'tomato','deepskyblue','white'

@@ -212,7 +212,7 @@ class Dual_TT_visatten(STAR_CVAE):
             'diverse_pred_traj':diverse_pred_traj,
         }, model_save_path)
 
-    def forward(self, inputs, stage,batch_id):
+    def forward(self, inputs, stage,batch_id,batch):
         # 此处的stage是对应的support的
         # 注意此处inputs前期输入的是19s，此处更改为正确的20s，因为方法不一样了
         # nodes_abs 为原始的轨迹 后续也用这个 seq
@@ -301,11 +301,11 @@ class Dual_TT_visatten(STAR_CVAE):
         # total_loss = 1.5*loss_pred + loss_recover + loss_kl + 2.0*loss_diverse
         # 这个可以等到后期相应的完全训练完后 再基于该数据去跑一遍 但是不更新数据！！即用好的参数在模型在跑一遍数据 
         # todo 后续训练完毕后进行分析并绘画最终的值 先保存每个bag的数据 而后继续分析
-        # self.save_dict(updated_batch_pednum,nei_list,nodes_current,past_att_dict,diverse_pred_traj,batch_id,test_set=self.args.test_set)
-        # draw_attention_map(updated_batch_pednum,nei_list,nodes_current,past_att_dict,diverse_pred_traj,batch_id,test_set=self.args.test_set)
+        #self.save_dict(updated_batch_pednum,nei_list,nodes_current,past_att_dict,diverse_pred_traj,batch_id,test_set=self.args.test_set,batch=batch)
+        draw_attention_map(updated_batch_pednum,nei_list,nodes_current,past_att_dict,diverse_pred_traj,batch_id,test_set=self.args.test_set,batch=batch)
         return total_loss, loss_pred.item(), loss_recover.item(), loss_kl.item(), loss_diverse.item(),loss_TT.item()
 
-    def save_dict(self,updated_batch_pednum,nei_list,nodes_current,past_att_dict,diverse_pred_traj,batch_id,test_set):
+    def save_dict(self,updated_batch_pednum,nei_list,nodes_current,past_att_dict,diverse_pred_traj,batch_id,test_set,batch):
         """
         将提供的数据打包成字典。
         
@@ -330,7 +330,8 @@ class Dual_TT_visatten(STAR_CVAE):
             'batch_id': batch_id,
             'test_set': test_set
         }
-        model_save_path = os.path.join(self.args.model_dir,f"{self.args.train_model}{str(stage)}_{str(self.args.test_set)}.tar")
+        model_save_path_base =  "/mnt/sda/euf1szh/STAR/result/vis_atten/debug_hotel/"
+        model_save_path = os.path.join(model_save_path_base,f"batch_{batch}","vis.tar")
         torch.save(data_dict,model_save_path)
 
     def inference(self, inputs):
