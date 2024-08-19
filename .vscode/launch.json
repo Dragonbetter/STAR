@@ -1,0 +1,35 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Train Model",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/trainval.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--dataset", "ETH_UCY",
+                "--SDD_if_filter", "True",
+                "--test_set", "hotel",
+                "--neighbor_thred", "10",
+                "--device", "2",
+                "--phase", "train",
+                "--stage", "origin",
+                "--train_model", "Dual_TT_visatten",
+                "--batch_around_ped", "256",
+                "--batch_around_ped_meta", "256",
+                "--start_test", "0",
+                "--PE", "False",
+                "--num_epochs", "1000",
+                "--Dual_TT_ablation", "Dual_TT",
+                "--param_diff", "NoPE_MLP_DualTT_LossAlign",
+                "--seq_length", "20" ,
+                "--obs_length", "8" ,
+                "--pred_length", "12",
+            ],
+            "env": {
+                "PYTHONUNBUFFERED": "1"
+            }
+        }
+    ]
+}
